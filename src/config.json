@@ -1,0 +1,48 @@
+{
+  "forex": {
+    "cny_to_eur_rate": 0.127,
+    "exchange_fee": 0.025,
+    "fallback_rate": 0.127,
+    "api_url": "https://api.exchangerate-api.com/v4/latest/CNY",
+    "ttl_seconds": 3600
+  },
+  "logistics": {
+    "forwarder_type": "cssbuy",
+    "agent_service_fee_rate": 0.05,
+    "inspection_fee_eur": 3.0,
+    "domestic_shipping_cn_eur": 5.0,
+    "insurance_fee_rate": 0.015,
+    "international_shipping_eur": 30.0,
+    "customs_clearance_fee_eur": 15.0,
+    "import_duty_rate": 0.0,
+    "domestic_shipping_eur": 7.0
+  },
+  "tax": {
+    "pt_vat_rate": 0.23
+  },
+  "marketplace_fees": {
+    "olx_fee_rate": 0.0,
+    "vinted_fee_rate": 0.05,
+    "kuantokusta_fee_rate": 0.0,
+    "amazon_fee_rate": 0.08,
+    "default_resale_fee_rate": 0.05
+  },
+  "profitability": {
+    "min_margin_pct": 0.15,
+    "min_net_profit_eur": 30.0
+  },
+  "scam_filter": {
+    "hide_threshold": 60
+  },
+  "scraping": {
+    "max_listings_per_search": 50,
+    "max_pages": 3,
+    "jitter_min_ms": 3000,
+    "jitter_max_ms": 7000,
+    "goofish_search_url": "https://www.goofish.com/search?q=",
+    "olx_search_url": "https://www.olx.pt/q-",
+    "vinted_search_url": "https://www.vinted.pt/",
+    "kuantokusta_search_url": "https://www.kuantokusta.pt/search?q=",
+    "amazon_search_url": "https://www.amazon.es/s?k="
+  }
+}

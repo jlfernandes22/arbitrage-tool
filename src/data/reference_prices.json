@@ -1,0 +1,975 @@
+{
+  "iPhone 12 64GB": {
+    "new": 380,
+    "excellent": 320,
+    "very_good": 285,
+    "good": 240,
+    "fair": 180
+  },
+  "iPhone 12 128GB": {
+    "new": 420,
+    "excellent": 355,
+    "very_good": 315,
+    "good": 265,
+    "fair": 200
+  },
+  "iPhone 12 Pro 128GB": {
+    "new": 580,
+    "excellent": 490,
+    "very_good": 440,
+    "good": 375,
+    "fair": 280
+  },
+  "iPhone 12 Pro 256GB": {
+    "new": 640,
+    "excellent": 540,
+    "very_good": 485,
+    "good": 410,
+    "fair": 310
+  },
+  "iPhone 13 128GB": {
+    "new": 480,
+    "excellent": 420,
+    "very_good": 380,
+    "good": 320,
+    "fair": 240
+  },
+  "iPhone 13 256GB": {
+    "new": 550,
+    "excellent": 480,
+    "very_good": 430,
+    "good": 360,
+    "fair": 270
+  },
+  "iPhone 14 128GB": {
+    "new": 590,
+    "excellent": 520,
+    "very_good": 470,
+    "good": 400,
+    "fair": 300
+  },
+  "iPhone 14 Pro 128GB": {
+    "new": 850,
+    "excellent": 760,
+    "very_good": 690,
+    "good": 590,
+    "fair": 440
+  },
+  "iPhone 14 Pro 256GB": {
+    "new": 930,
+    "excellent": 830,
+    "very_good": 750,
+    "good": 640,
+    "fair": 480
+  },
+  "iPhone 15 128GB": {
+    "new": 760,
+    "excellent": 680,
+    "very_good": 615,
+    "good": 525,
+    "fair": 395
+  },
+  "iPhone 15 Pro 256GB": {
+    "new": 1120,
+    "excellent": 1000,
+    "very_good": 905,
+    "good": 770,
+    "fair": 580
+  },
+  "iPhone 16 128GB": {
+    "new": 880,
+    "excellent": 790,
+    "very_good": 715,
+    "good": 610,
+    "fair": 460
+  },
+  "iPhone 16 256GB": {
+    "new": 990,
+    "excellent": 890,
+    "very_good": 805,
+    "good": 685,
+    "fair": 515
+  },
+  "iPhone 16 Plus 128GB": {
+    "new": 990,
+    "excellent": 890,
+    "very_good": 805,
+    "good": 685,
+    "fair": 515
+  },
+  "iPhone 16 Plus 256GB": {
+    "new": 1100,
+    "excellent": 990,
+    "very_good": 895,
+    "good": 760,
+    "fair": 570
+  },
+  "iPhone 16 Pro 128GB": {
+    "new": 1220,
+    "excellent": 1090,
+    "very_good": 985,
+    "good": 840,
+    "fair": 630
+  },
+  "iPhone 16 Pro 256GB": {
+    "new": 1320,
+    "excellent": 1180,
+    "very_good": 1065,
+    "good": 905,
+    "fair": 680
+  },
+  "iPhone 16 Pro 512GB": {
+    "new": 1520,
+    "excellent": 1360,
+    "very_good": 1225,
+    "good": 1040,
+    "fair": 780
+  },
+  "iPhone 16 Pro Max 256GB": {
+    "new": 1440,
+    "excellent": 1290,
+    "very_good": 1165,
+    "good": 990,
+    "fair": 745
+  },
+  "iPhone 16 Pro Max 512GB": {
+    "new": 1640,
+    "excellent": 1470,
+    "very_good": 1325,
+    "good": 1125,
+    "fair": 845
+  },
+  "iPhone 17 128GB": {
+    "new": 980,
+    "excellent": 880,
+    "very_good": 795,
+    "good": 675,
+    "fair": 510
+  },
+  "iPhone 17 256GB": {
+    "new": 1090,
+    "excellent": 980,
+    "very_good": 885,
+    "good": 755,
+    "fair": 565
+  },
+  "iPhone 17 Plus 128GB": {
+    "new": 1090,
+    "excellent": 980,
+    "very_good": 885,
+    "good": 755,
+    "fair": 565
+  },
+  "iPhone 17 Plus 256GB": {
+    "new": 1210,
+    "excellent": 1085,
+    "very_good": 980,
+    "good": 835,
+    "fair": 625
+  },
+  "iPhone 17 Pro 256GB": {
+    "new": 1420,
+    "excellent": 1270,
+    "very_good": 1145,
+    "good": 975,
+    "fair": 730
+  },
+  "iPhone 17 Pro 512GB": {
+    "new": 1620,
+    "excellent": 1450,
+    "very_good": 1310,
+    "good": 1115,
+    "fair": 835
+  },
+  "iPhone 17 Pro Max 256GB": {
+    "new": 1540,
+    "excellent": 1380,
+    "very_good": 1245,
+    "good": 1060,
+    "fair": 795
+  },
+  "iPhone 17 Pro Max 512GB": {
+    "new": 1740,
+    "excellent": 1560,
+    "very_good": 1405,
+    "good": 1195,
+    "fair": 895
+  },
+  "MacBook Air M1 13 256GB": {
+    "new": 1050,
+    "excellent": 880,
+    "very_good": 790,
+    "good": 670,
+    "fair": 500
+  },
+  "MacBook Air M2 13 256GB": {
+    "new": 1320,
+    "excellent": 1120,
+    "very_good": 1010,
+    "good": 860,
+    "fair": 645
+  },
+  "MacBook Pro M2 14 512GB": {
+    "new": 2150,
+    "excellent": 1820,
+    "very_good": 1640,
+    "good": 1395,
+    "fair": 1045
+  },
+  "MacBook Pro M3 14 512GB": {
+    "new": 2350,
+    "excellent": 1990,
+    "very_good": 1795,
+    "good": 1525,
+    "fair": 1145
+  },
+  "iPad Mini 6 64GB": {
+    "new": 520,
+    "excellent": 440,
+    "very_good": 395,
+    "good": 335,
+    "fair": 250
+  },
+  "iPad Mini 6 256GB": {
+    "new": 680,
+    "excellent": 575,
+    "very_good": 515,
+    "good": 440,
+    "fair": 330
+  },
+  "iPad Air 5 64GB": {
+    "new": 680,
+    "excellent": 575,
+    "very_good": 515,
+    "good": 440,
+    "fair": 330
+  },
+  "iPad Pro 11 128GB": {
+    "new": 950,
+    "excellent": 805,
+    "very_good": 725,
+    "good": 615,
+    "fair": 460
+  },
+  "iPad 10 64GB": {
+    "new": 420,
+    "excellent": 355,
+    "very_good": 320,
+    "good": 270,
+    "fair": 200
+  },
+  "PlayStation 5 Slim Disc": {
+    "new": 520,
+    "excellent": 440,
+    "very_good": 395,
+    "good": 335,
+    "fair": 250
+  },
+  "PlayStation 5 Slim Digital": {
+    "new": 470,
+    "excellent": 395,
+    "very_good": 355,
+    "good": 300,
+    "fair": 225
+  },
+  "PlayStation 5 Standard Disc": {
+    "new": 560,
+    "excellent": 470,
+    "very_good": 425,
+    "good": 360,
+    "fair": 270
+  },
+  "PlayStation 5 Standard Digital": {
+    "new": 500,
+    "excellent": 420,
+    "very_good": 380,
+    "good": 320,
+    "fair": 240
+  },
+  "Canon EOS R5": {
+    "new": 4200,
+    "excellent": 3700,
+    "very_good": 3300,
+    "good": 2900,
+    "fair": 2400
+  },
+  "Canon EOS R6 Mark II": {
+    "new": 2800,
+    "excellent": 2500,
+    "very_good": 2200,
+    "good": 1900,
+    "fair": 1500
+  },
+  "Canon EOS R8": {
+    "new": 1900,
+    "excellent": 1700,
+    "very_good": 1500,
+    "good": 1300,
+    "fair": 1000
+  },
+  "Canon EOS RP": {
+    "new": 1200,
+    "excellent": 1000,
+    "very_good": 850,
+    "good": 700,
+    "fair": 500
+  },
+  "Nikon Z 8": {
+    "new": 4000,
+    "excellent": 3600,
+    "very_good": 3200,
+    "good": 2800,
+    "fair": 2300
+  },
+  "Nikon Z 6 III": {
+    "new": 2700,
+    "excellent": 2400,
+    "very_good": 2100,
+    "good": 1800,
+    "fair": 1400
+  },
+  "Nikon Z f": {
+    "new": 2000,
+    "excellent": 1800,
+    "very_good": 1600,
+    "good": 1400,
+    "fair": 1100
+  },
+  "Fujifilm X-T5": {
+    "new": 1900,
+    "excellent": 1700,
+    "very_good": 1500,
+    "good": 1300,
+    "fair": 1000
+  },
+  "Fujifilm X100VI": {
+    "new": 1700,
+    "excellent": 1600,
+    "very_good": 1500,
+    "good": 1350,
+    "fair": 1100
+  },
+  "Fujifilm X-H2": {
+    "new": 2200,
+    "excellent": 2000,
+    "very_good": 1800,
+    "good": 1550,
+    "fair": 1200
+  },
+  "Shure SM7B": {
+    "new": 400,
+    "excellent": 350,
+    "very_good": 300,
+    "good": 260,
+    "fair": 200
+  },
+  "Shure MV7 Plus": {
+    "new": 280,
+    "excellent": 240,
+    "very_good": 210,
+    "good": 180,
+    "fair": 140
+  },
+  "Rode NT1 5th Gen": {
+    "new": 260,
+    "excellent": 220,
+    "very_good": 190,
+    "good": 160,
+    "fair": 120
+  },
+  "Rode PodMic": {
+    "new": 100,
+    "excellent": 85,
+    "very_good": 70,
+    "good": 55,
+    "fair": 40
+  },
+  "Rode NT-USB": {
+    "new": 180,
+    "excellent": 150,
+    "very_good": 130,
+    "good": 110,
+    "fair": 80
+  },
+  "Rode Wireless GO II": {
+    "new": 300,
+    "excellent": 260,
+    "very_good": 230,
+    "good": 200,
+    "fair": 150
+  },
+  "JBL Flip 6": {
+    "new": 130,
+    "excellent": 100,
+    "very_good": 85,
+    "good": 70,
+    "fair": 50
+  },
+  "JBL Charge 5": {
+    "new": 180,
+    "excellent": 140,
+    "very_good": 120,
+    "good": 100,
+    "fair": 70
+  },
+  "JBL Extreme 4": {
+    "new": 350,
+    "excellent": 290,
+    "very_good": 250,
+    "good": 210,
+    "fair": 150
+  },
+  "Bose SoundLink Flex": {
+    "new": 150,
+    "excellent": 120,
+    "very_good": 100,
+    "good": 85,
+    "fair": 60
+  },
+  "Bose QuietComfort Ultra": {
+    "new": 430,
+    "excellent": 360,
+    "very_good": 310,
+    "good": 260,
+    "fair": 190
+  },
+  "Sonos Era 100": {
+    "new": 280,
+    "excellent": 240,
+    "very_good": 210,
+    "good": 180,
+    "fair": 140
+  },
+  "Sonos Era 300": {
+    "new": 500,
+    "excellent": 430,
+    "very_good": 380,
+    "good": 320,
+    "fair": 250
+  },
+  "Sonos Move 2": {
+    "new": 450,
+    "excellent": 380,
+    "very_good": 330,
+    "good": 280,
+    "fair": 220
+  },
+  "XGIMI Horizon Pro": {
+    "new": 1100,
+    "excellent": 900,
+    "very_good": 780,
+    "good": 650,
+    "fair": 480
+  },
+  "XGIMI Halo Plus": {
+    "new": 800,
+    "excellent": 650,
+    "very_good": 550,
+    "good": 460,
+    "fair": 340
+  },
+  "XGIMI MoGo 2 Pro": {
+    "new": 450,
+    "excellent": 380,
+    "very_good": 320,
+    "good": 270,
+    "fair": 200
+  },
+  "Anker Nebula Mars 3": {
+    "new": 800,
+    "excellent": 680,
+    "very_good": 580,
+    "good": 490,
+    "fair": 360
+  },
+  "Anker Nebula Capsule 3 Laser": {
+    "new": 600,
+    "excellent": 500,
+    "very_good": 430,
+    "good": 360,
+    "fair": 270
+  },
+  "Dyson V15 Detect": {
+    "new": 750,
+    "excellent": 620,
+    "very_good": 530,
+    "good": 440,
+    "fair": 320
+  },
+  "Dyson V12 Detect Slim": {
+    "new": 650,
+    "excellent": 540,
+    "very_good": 460,
+    "good": 380,
+    "fair": 280
+  },
+  "Dyson V11 Absolute": {
+    "new": 600,
+    "excellent": 480,
+    "very_good": 400,
+    "good": 330,
+    "fair": 240
+  },
+  "Dyson Gen 5 Detect": {
+    "new": 950,
+    "excellent": 800,
+    "very_good": 680,
+    "good": 570,
+    "fair": 420
+  },
+  "Dyson Airwrap Complete": {
+    "new": 600,
+    "excellent": 500,
+    "very_good": 430,
+    "good": 360,
+    "fair": 270
+  },
+  "Dyson Supersonic Hair Dryer": {
+    "new": 430,
+    "excellent": 360,
+    "very_good": 310,
+    "good": 260,
+    "fair": 190
+  },
+  "Dyson Corrale Hair Straightener": {
+    "new": 450,
+    "excellent": 380,
+    "very_good": 320,
+    "good": 270,
+    "fair": 200
+  },
+  "Roborock S8 MaxV": {
+    "new": 1100,
+    "excellent": 900,
+    "very_good": 770,
+    "good": 640,
+    "fair": 470
+  },
+  "Roborock S8": {
+    "new": 750,
+    "excellent": 620,
+    "very_good": 530,
+    "good": 440,
+    "fair": 320
+  },
+  "Roborock Qrevo MaxV": {
+    "new": 900,
+    "excellent": 750,
+    "very_good": 640,
+    "good": 530,
+    "fair": 390
+  },
+  "Ecovacs Deebot X2 Omni": {
+    "new": 1000,
+    "excellent": 830,
+    "very_good": 710,
+    "good": 590,
+    "fair": 430
+  },
+  "Ecovacs Deebot T30 Pro": {
+    "new": 800,
+    "excellent": 660,
+    "very_good": 560,
+    "good": 470,
+    "fair": 340
+  },
+  "Honor Magic 7 Pro": {
+    "new": 900,
+    "excellent": 750,
+    "very_good": 640,
+    "good": 530,
+    "fair": 390
+  },
+  "Honor Magic 6 Pro": {
+    "new": 800,
+    "excellent": 660,
+    "very_good": 560,
+    "good": 470,
+    "fair": 340
+  },
+  "Realme GT 7 Pro": {
+    "new": 650,
+    "excellent": 540,
+    "very_good": 460,
+    "good": 380,
+    "fair": 280
+  },
+  "Vivo X200 Pro": {
+    "new": 1000,
+    "excellent": 830,
+    "very_good": 710,
+    "good": 590,
+    "fair": 430
+  },
+  "Vivo X100 Pro": {
+    "new": 900,
+    "excellent": 750,
+    "very_good": 640,
+    "good": 530,
+    "fair": 390
+  },
+  "Motorola Edge 60 Pro": {
+    "new": 700,
+    "excellent": 580,
+    "very_good": 490,
+    "good": 410,
+    "fair": 300
+  },
+  "Motorola Razr 60 Ultra": {
+    "new": 1100,
+    "excellent": 920,
+    "very_good": 780,
+    "good": 650,
+    "fair": 480
+  },
+  "Logitech G Pro X Superlight 2": {
+    "new": 160,
+    "excellent": 130,
+    "very_good": 110,
+    "good": 90,
+    "fair": 65
+  },
+  "Logitech MX Master 3S": {
+    "new": 110,
+    "excellent": 90,
+    "very_good": 75,
+    "good": 60,
+    "fair": 45
+  },
+  "Logitech G502 X Plus": {
+    "new": 160,
+    "excellent": 130,
+    "very_good": 110,
+    "good": 90,
+    "fair": 65
+  },
+  "Razer DeathAdder V3 Pro": {
+    "new": 160,
+    "excellent": 130,
+    "very_good": 110,
+    "good": 90,
+    "fair": 65
+  },
+  "Razer Viper V3 Pro": {
+    "new": 170,
+    "excellent": 140,
+    "very_good": 120,
+    "good": 100,
+    "fair": 70
+  },
+  "Razer BlackShark V2 Pro": {
+    "new": 180,
+    "excellent": 150,
+    "very_good": 130,
+    "good": 110,
+    "fair": 80
+  },
+  "Razer Huntsman V3 Pro": {
+    "new": 250,
+    "excellent": 210,
+    "very_good": 180,
+    "good": 150,
+    "fair": 110
+  },
+  "Razer Blade 16": {
+    "new": 3000,
+    "excellent": 2500,
+    "very_good": 2150,
+    "good": 1800,
+    "fair": 1400
+  },
+  "ASUS ROG Strix Scar 18": {
+    "new": 3500,
+    "excellent": 2900,
+    "very_good": 2500,
+    "good": 2100,
+    "fair": 1600
+  },
+  "ASUS ROG Zephyrus G16": {
+    "new": 2500,
+    "excellent": 2100,
+    "very_good": 1800,
+    "good": 1500,
+    "fair": 1100
+  },
+  "Corsair K100 RGB": {
+    "new": 250,
+    "excellent": 210,
+    "very_good": 180,
+    "good": 150,
+    "fair": 110
+  },
+  "Corsair Virtuoso Max": {
+    "new": 250,
+    "excellent": 210,
+    "very_good": 180,
+    "good": 150,
+    "fair": 110
+  },
+  "HP LaserJet Pro M404": {
+    "new": 300,
+    "excellent": 250,
+    "very_good": 210,
+    "good": 170,
+    "fair": 120
+  },
+  "HP OfficeJet Pro 9015": {
+    "new": 250,
+    "excellent": 200,
+    "very_good": 170,
+    "good": 140,
+    "fair": 100
+  },
+  "Epson EcoTank ET-3850": {
+    "new": 400,
+    "excellent": 330,
+    "very_good": 280,
+    "good": 230,
+    "fair": 170
+  },
+  "Brother HL-L2350DW": {
+    "new": 180,
+    "excellent": 150,
+    "very_good": 125,
+    "good": 100,
+    "fair": 70
+  },
+  "Sony WH-1000XM6": {
+    "new": 430,
+    "excellent": 360,
+    "very_good": 310,
+    "good": 260,
+    "fair": 190
+  },
+  "Ninja Slushi": {
+    "new": 250,
+    "excellent": 200,
+    "very_good": 170,
+    "good": 140,
+    "fair": 100
+  },
+  "Ninja Creami": {
+    "new": 200,
+    "excellent": 160,
+    "very_good": 130,
+    "good": 100,
+    "fair": 70
+  },
+  "Ninja Creami Deluxe": {
+    "new": 250,
+    "excellent": 200,
+    "very_good": 170,
+    "good": 140,
+    "fair": 100
+  },
+  "Ninja Air Fryer Max Pro": {
+    "new": 200,
+    "excellent": 160,
+    "very_good": 130,
+    "good": 100,
+    "fair": 70
+  },
+  "Ninja DoubleStack Air Fryer": {
+    "new": 250,
+    "excellent": 200,
+    "very_good": 170,
+    "good": 140,
+    "fair": 100
+  },
+  "Vitamix A3500": {
+    "new": 650,
+    "excellent": 540,
+    "very_good": 460,
+    "good": 380,
+    "fair": 280
+  },
+  "Vitamix A2500": {
+    "new": 500,
+    "excellent": 420,
+    "very_good": 360,
+    "good": 300,
+    "fair": 220
+  },
+  "Vitamix E310": {
+    "new": 400,
+    "excellent": 330,
+    "very_good": 280,
+    "good": 230,
+    "fair": 170
+  },
+  "Vitamix 5200": {
+    "new": 450,
+    "excellent": 370,
+    "very_good": 310,
+    "good": 260,
+    "fair": 190
+  },
+  "JBL Flip 7": {
+    "new": 150,
+    "excellent": 120,
+    "very_good": 100,
+    "good": 80,
+    "fair": 55
+  },
+  "JBL Charge 6": {
+    "new": 200,
+    "excellent": 160,
+    "very_good": 135,
+    "good": 110,
+    "fair": 80
+  },
+  "JBL Go 5": {
+    "new": 80,
+    "excellent": 65,
+    "very_good": 55,
+    "good": 45,
+    "fair": 30
+  },
+  "JBL Extreme 5": {
+    "new": 400,
+    "excellent": 330,
+    "very_good": 280,
+    "good": 230,
+    "fair": 170
+  },
+  "JBL PartyBox Stage 320": {
+    "new": 350,
+    "excellent": 290,
+    "very_good": 250,
+    "good": 210,
+    "fair": 150
+  },
+  "JBL PartyBox Club 120": {
+    "new": 250,
+    "excellent": 200,
+    "very_good": 170,
+    "good": 140,
+    "fair": 100
+  },
+  "JBL PartyBox Encore Essential": {
+    "new": 200,
+    "excellent": 160,
+    "very_good": 135,
+    "good": 110,
+    "fair": 80
+  },
+  "JBL PartyBox 310": {
+    "new": 450,
+    "excellent": 370,
+    "very_good": 310,
+    "good": 260,
+    "fair": 190
+  },
+  "JBL PartyLight Speaker": {
+    "new": 150,
+    "excellent": 120,
+    "very_good": 100,
+    "good": 80,
+    "fair": 55
+  },
+  "JBL PartyLight Lantern": {
+    "new": 100,
+    "excellent": 80,
+    "very_good": 65,
+    "good": 50,
+    "fair": 35
+  },
+  "JBL PartyLight Stick": {
+    "new": 80,
+    "excellent": 65,
+    "very_good": 55,
+    "good": 45,
+    "fair": 30
+  },
+  "JBL Sing Classic": {
+    "new": 120,
+    "excellent": 95,
+    "very_good": 80,
+    "good": 65,
+    "fair": 45
+  },
+  "JBL Sing Mini": {
+    "new": 80,
+    "excellent": 65,
+    "very_good": 55,
+    "good": 45,
+    "fair": 30
+  },
+  "Xiaomi Mi Smart Desk Lamp Pro": {
+    "new": 80,
+    "excellent": 65,
+    "very_good": 55,
+    "good": 45,
+    "fair": 30
+  },
+  "Xiaomi Mi Desk Lamp 1S": {
+    "new": 50,
+    "excellent": 40,
+    "very_good": 35,
+    "good": 28,
+    "fair": 20
+  },
+  "Xiaomi Mi Bedside Lamp 2": {
+    "new": 70,
+    "excellent": 55,
+    "very_good": 45,
+    "good": 38,
+    "fair": 25
+  },
+  "Xiaomi Mijia Table Lamp Pro": {
+    "new": 90,
+    "excellent": 75,
+    "very_good": 63,
+    "good": 52,
+    "fair": 37
+  },
+  "Xiaomi Mi Smart LED Bulb Essential": {
+    "new": 25,
+    "excellent": 20,
+    "very_good": 17,
+    "good": 14,
+    "fair": 10
+  },
+  "Xiaomi Yeelight LED Bulb": {
+    "new": 30,
+    "excellent": 25,
+    "very_good": 21,
+    "good": 17,
+    "fair": 12
+  },
+  "Xiaomi Mijia Smart Bulb": {
+    "new": 35,
+    "excellent": 28,
+    "very_good": 24,
+    "good": 20,
+    "fair": 14
+  },
+  "Xiaomi Mi Air Purifier 4 Pro": {
+    "new": 350,
+    "excellent": 290,
+    "very_good": 250,
+    "good": 210,
+    "fair": 150
+  },
+  "Xiaomi Mi Air Purifier 4": {
+    "new": 250,
+    "excellent": 200,
+    "very_good": 170,
+    "good": 140,
+    "fair": 100
+  },
+  "Xiaomi Mi Smart Humidifier 2": {
+    "new": 120,
+    "excellent": 95,
+    "very_good": 80,
+    "good": 65,
+    "fair": 45
+  },
+  "Xiaomi Mi Smart Kettle Pro": {
+    "new": 60,
+    "excellent": 48,
+    "very_good": 40,
+    "good": 33,
+    "fair": 23
+  }
+}

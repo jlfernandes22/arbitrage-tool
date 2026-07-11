@@ -1,0 +1,76 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// Arbitrage Intelligence Tool schema
+
+model Task {
+  id          String   @id @default(cuid())
+  query       String
+  category    String
+  status      String   @default("pending") // pending | scraping_goofish | matching_eu | calculating | done | error | paused
+  progress    Int      @default(0)
+  step        String?
+  error       String?
+  manualHtml  String?
+  resultsJson String?
+  summaryJson String?
+  degraded    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([status])
+  @@index([createdAt])
+}
+
+// Reference price matrix — migrated from data/reference_prices.json so the
+// admin UI can edit baseline EUR prices per SKU/condition with DB durability.
+model ReferencePrice {
+  id        String   @id @default(cuid())
+  standardKey String  @unique // e.g. "iPhone 13 128GB"
+  category  String // iphone | macbook | ipad | ps5
+  newPrice      Float
+  excellentPrice Float
+  veryGoodPrice Float
+  goodPrice     Float
+  fairPrice     Float
+  updatedAt DateTime @updatedAt
+
+  @@index([category])
+}
+
+model MarketComp {
+  id        String   @id @default(cuid())
+  platform  String // olx | vinted
+  queryKey  String
+  title     String
+  priceEur  Float
+  condition String?
+  location  String?
+  dataJson  String
+  fetchedAt DateTime @default(now())
+  expiresAt DateTime
+
+  @@index([platform, queryKey])
+  @@index([expiresAt])
+}
+
+model ForexRate {
+  id        String   @id @default(cuid())
+  fromCcy   String
+  toCcy     String
+  rate      Float
+  source    String
+  fetchedAt DateTime @default(now())
+  expiresAt DateTime
+
+  @@unique([fromCcy, toCcy])
+}
