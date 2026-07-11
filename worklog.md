@@ -826,3 +826,38 @@ Verification (agent-browser eval after hovering a bar): inner tooltip `backgroun
 4. **Persist column toggle state** — lift `hiddenColumns` to localStorage so it survives re-scans.
 5. **Scan progress step indicators use backend status** — map `status.status` directly to the active step instead of inferring from progress thresholds.
 6. **Export column visibility** — when columns are hidden, CSV/JSON export should optionally respect the visibility (or always export all — current behavior).
+
+---
+
+## Task ID: Final (Documentation Update — README + Worklog)
+**Agent:** main (Z.ai Code)
+**Task:** Update README.md and worklog.md with current project state.
+
+### README.md — Complete Rewrite
+Updated to reflect the current state of the project:
+- Added KuantoKusta.pt and Amazon.es as scrapers (was only Goofish + OLX + Vinted)
+- Added detailed scraper documentation for all 5 scrapers (Goofish, OLX, Vinted, KuantoKusta, Amazon)
+- Documented the fresh-browser fix for Goofish (not shared singleton)
+- Documented the listing enrichment system with toggle
+- Documented the risk scoring system (seller-rating-based, not price-based)
+- Added accessory filtering documentation (€100–€3000 range + keyword filter)
+- Added EU market links feature (sidebar below Scan History)
+- Added debug scrapers feature (unified panel + 5 endpoints)
+- Updated architecture section with all new components and API routes
+- Added Git setup instructions
+- Updated features list with all new features
+
+### Worklog.md — This Entry
+This is the final worklog entry documenting the documentation update.
+
+### Current Project State
+- **Goofish scraper:** Working (fresh browser, English query, retry, surgical modal removal)
+- **OLX scraper:** Working (Playwright, accessory filter, price range €100–€3000)
+- **Vinted scraper:** Working (Cloudflare retry, accessory filter)
+- **KuantoKusta scraper:** Code correct (URL fixed to /search), blocked by Akamai on datacenter IPs
+- **Amazon scraper:** Working (HTTP fetch first, Playwright fallback, accessory filter)
+- **Enrichment:** Toggleable (OFF = fast scan with condition flags only, ON = full seller ratings + images)
+- **Risk scoring:** Seller-rating-based (not price-based)
+- **Debug:** Unified panel with 5 individual buttons + "Run All"
+- **EU market links:** Collapsible list in sidebar below Scan History
+- **Lint:** Clean (0 errors)
