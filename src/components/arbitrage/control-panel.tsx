@@ -1446,7 +1446,7 @@ export function ControlPanel({
           </div>
         </CollapsibleContent>
       </Collapsible>
-      {/* ── Goofish Debug ─────────────────────────────────────────────── */}
+      {/* ── Debug Scrapers (unified) ─────────────────────────────────── */}
       <Collapsible open={debugOpen} onOpenChange={setDebugOpen} className="w-full sm:w-auto">
         <div className="flex items-center gap-2">
           <CollapsibleTrigger asChild>
@@ -1456,7 +1456,7 @@ export function ControlPanel({
               className="w-full gap-1 border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100 hover:text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300 dark:hover:bg-amber-950 sm:w-auto"
             >
               <Bug className="h-3.5 w-3.5" />
-              Debug Goofish Scraper
+              Debug Scrapers
               <ChevronDown
                 className={`ml-1 h-3.5 w-3.5 transition-transform ${
                   debugOpen ? "rotate-180" : ""
@@ -1468,74 +1468,83 @@ export function ControlPanel({
         <CollapsibleContent className="mt-3">
           <div className="space-y-3 rounded-lg border border-amber-200 bg-amber-50/30 p-4 dark:border-amber-900 dark:bg-amber-950/20">
             <p className="text-xs text-muted-foreground">
-              Runs the Goofish scraper in debug mode. Captures screenshots
-              (saved to <code className="rounded bg-muted px-1 font-mono text-[10px]">db/debug-screenshots/</code>),
-              selector counts, page title, HTML length, and any page errors — so you can see exactly
-              what the browser is seeing when 0 listings are returned.
+              Run debug on any scraper to capture screenshots, selector counts,
+              and sample listings. Results appear in the console below.
+              Screenshots are saved to <code className="rounded bg-muted px-1 font-mono text-[10px]">db/debug-screenshots/</code>.
             </p>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              {[
+                { name: "goofish", label: "Goofish", color: "border-rose-300 bg-rose-50 text-rose-700 hover:bg-rose-100 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-300" },
+                { name: "olx", label: "OLX", color: "border-teal-300 bg-teal-50 text-teal-700 hover:bg-teal-100 dark:border-teal-800 dark:bg-teal-950/40 dark:text-teal-300" },
+                { name: "vinted", label: "Vinted", color: "border-fuchsia-300 bg-fuchsia-50 text-fuchsia-700 hover:bg-fuchsia-100 dark:border-fuchsia-800 dark:bg-fuchsia-950/40 dark:text-fuchsia-300" },
+                { name: "kuantokusta", label: "KuantoKusta", color: "border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300" },
+                { name: "amazon", label: "Amazon", color: "border-orange-300 bg-orange-50 text-orange-700 hover:bg-orange-100 dark:border-orange-800 dark:bg-orange-950/40 dark:text-orange-300" },
+              ].map((scraper) => (
+                <Button
+                  key={scraper.name}
+                  variant="outline"
+                  size="sm"
+                  className={`h-7 gap-1 text-xs ${scraper.color}`}
+                  disabled={debugLoading || !query.trim()}
+                  onClick={async () => {
+                    setDebugLoading(true);
+                    setDebugResult(null);
+                    try {
+                      const res = await fetch(`/api/debug/${scraper.name}?query=${encodeURIComponent(query.trim())}`);
+                      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                      const data = await res.json();
+                      const summary = [
+                        `Scraper: ${scraper.name}`,
+                        `Query: ${data.query}`,
+                        ``,
+                        `=== STEPS ===`,
+                        ...(data.steps || []).map((s: { step: string; [k: string]: unknown }) =>
+                          `${s.step}: ${JSON.stringify(s).slice(0, 300)}`),
+                        ``,
+                        data.errors?.length > 0 ? `=== ERRORS ===\n${data.errors.join("\n")}` : "No errors",
+                      ].join("\n");
+                      setDebugResult(summary);
+                    } catch (e) {
+                      setDebugResult(`Debug failed: ${e instanceof Error ? e.message : String(e)}`);
+                    } finally {
+                      setDebugLoading(false);
+                    }
+                  }}
+                >
+                  {debugLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Bug className="h-3 w-3" />}
+                  {scraper.label}
+                </Button>
+              ))}
+              {/* Run All button */}
               <Button
                 size="sm"
-                className="gap-1"
+                className="h-7 gap-1 text-xs"
                 disabled={debugLoading || !query.trim()}
                 onClick={async () => {
                   setDebugLoading(true);
                   setDebugResult(null);
-                  try {
-                    const res = await fetch(
-                      `/api/debug/goofish?query=${encodeURIComponent(query.trim())}`,
-                    );
-                    if (!res.ok) {
-                      throw new Error(`HTTP ${res.status}`);
-                    }
-                    const data = await res.json();
-                    const summary = [
-                      `Query: ${data.query}`,
-                      `Final listing count: ${data.finalListingCount}`,
-                      `Steps: ${data.steps.length}`,
-                      `Errors: ${data.errors.length}`,
-                      ``,
-                      `=== STEPS ===`,
-                      ...data.steps.map(
-                        (s: { step: string; details: Record<string, unknown> }) =>
-                          `${s.step}: ${JSON.stringify(s.details).slice(0, 300)}`,
-                      ),
-                      ``,
-                      data.errors.length > 0 ? `=== ERRORS ===\n${data.errors.join("\n")}` : "",
-                      ``,
-                      data.screenshotPaths.length > 0
-                        ? `=== SCREENSHOTS ===\n${data.screenshotPaths.join("\n")}`
-                        : "",
-                    ].join("\n");
-                    setDebugResult(summary);
-                  } catch (e) {
-                    setDebugResult(`Debug failed: ${e instanceof Error ? e.message : String(e)}`);
-                  } finally {
-                    setDebugLoading(false);
+                  const scrapers = ["goofish", "olx", "vinted", "kuantokusta", "amazon"];
+                  const allResults: string[] = [];
+                  for (const name of scrapers) {
+                    allResults.push(`\n${"=".repeat(60)}\n  ${name.toUpperCase()}\n${"=".repeat(60)}`);
+                    try {
+                      const res = await fetch(`/api/debug/${name}?query=${encodeURIComponent(query.trim())}`);
+                      if (!res.ok) { allResults.push(`HTTP ${res.status} — endpoint failed`); continue; }
+                      const data = await res.json();
+                      for (const s of data.steps || []) { allResults.push(`  ${s.step}: ${JSON.stringify(s).slice(0, 250)}`); }
+                      if (data.errors?.length > 0) { allResults.push(`  ERRORS:`); for (const e of data.errors) allResults.push(`    ${e}`); }
+                    } catch (e) { allResults.push(`  FAILED: ${e instanceof Error ? e.message : String(e)}`); }
                   }
+                  setDebugResult(allResults.join("\n"));
+                  setDebugLoading(false);
                 }}
               >
-                {debugLoading ? (
-                  <>
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    Running debug…
-                  </>
-                ) : (
-                  <>
-                    <Bug className="h-3.5 w-3.5" />
-                    Run Goofish Debug
-                  </>
-                )}
+                {debugLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Bug className="h-3 w-3" />}
+                Run All
               </Button>
               {debugResult && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    navigator.clipboard.writeText(debugResult);
-                  }}
-                >
-                  Copy Results
+                <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => navigator.clipboard.writeText(debugResult)}>
+                  Copy
                 </Button>
               )}
             </div>

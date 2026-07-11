@@ -985,13 +985,23 @@ async function scrapeGoofishLive(
       // ── ENRICHMENT: Open each listing page to get seller rating + image count ──
       // Skip enrichment if we're close to the overall timeout — better to
       // return un-enriched listings than to hang for another 60s.
+      // Also skip if enrichAll is false — the user opted out of enrichment.
       if (page) await page.close().catch(() => {});
       const elapsed = Date.now() - startTime;
       const remaining = OVERALL_TIMEOUT_MS - elapsed;
+      if (opts?.enrichAll !== true) {
+        // Enrichment disabled — return listings with condition flags only
+        await ctx.close();
+        await freshBrowser.close();
+        return {
+          listings: listings.slice(0, config.scraping.max_listings_per_search),
+          status: `${status} (enrichment disabled — toggle "Enrich all listings" to enable)`,
+        };
+      }
       if (remaining < 20000) {
         // Not enough time for enrichment — return listings with flags already set
         await ctx.close();
-      await freshBrowser.close();
+        await freshBrowser.close();
         return {
           listings: listings.slice(0, config.scraping.max_listings_per_search),
           status: `${status} (enrichment skipped — time limit)`,
