@@ -67,7 +67,7 @@ export function TerminalConsole({ logs, onClear, active }: TerminalConsoleProps)
           )}
           {warnCount > 0 && (
             <span className="rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-400">
-              {warnCount} warn
+              {warnCount} {warnCount === 1 ? "warning" : "warnings"}
             </span>
           )}
           <span className="text-[10px] text-slate-500 tabular-nums">

@@ -208,6 +208,11 @@ export default function Home() {
   }, [stopPolling]);
   const handleScan = useCallback(
     async (q: string, c: Category, overrides: AppConfigOverrides) => {
+      // If a scan is already running, cancel the old task first so they don't conflict
+      if (taskId && scanning) {
+        fetch(`/api/tasks/cancel/${taskId}`, { method: "POST" }).catch(() => {});
+        stopPolling();
+      }
       setScanning(true);
       setError(null);
       setResult(null);
@@ -237,7 +242,7 @@ export default function Home() {
         toast.error(`Failed to start scan: ${msg}`);
       }
     },
-    [pollStatus],
+    [taskId, scanning, stopPolling, pollStatus],
   );
   const handleManualPaste = useCallback(
     async (html: string) => {
@@ -347,25 +352,27 @@ export default function Home() {
   const handleDeleteTask = useCallback(
     async (deleteTaskId: string) => {
       try {
+        if (taskId === deleteTaskId) {
+          stopPolling();
+          fetch(`/api/tasks/cancel/${deleteTaskId}`, { method: "POST" }).catch(() => {});
+          setScanning(false);
+          setResult(null);
+          setStatus(null);
+          setTaskId(null);
+          setLogs([]);
+        }
         const res = await fetch(`/api/tasks/${deleteTaskId}`, { method: "DELETE" });
         if (!res.ok) {
           const e = await res.json().catch(() => ({}));
           throw new Error(e.error ?? "delete failed");
         }
         toast.success("Scan deleted from history");
-        // If the deleted task was the active one, clear the result view.
-        if (taskId === deleteTaskId) {
-          setResult(null);
-          setStatus(null);
-          setTaskId(null);
-          setLogs([]);
-        }
         setHistoryRefreshKey((k) => k + 1);
       } catch (e) {
         toast.error(e instanceof Error ? e.message : "Failed to delete scan");
       }
     },
-    [taskId],
+    [taskId, stopPolling],
   );
   // Re-evaluate: re-run profit calc on the current task's stored listings
   // using current reference prices + config, WITHOUT re-scraping. Useful
@@ -774,17 +781,20 @@ export default function Home() {
         </section>
         {/* Progress */}
         {(scanning || status) && (
-          <section className="space-y-2">
+          <section className="rounded-xl border bg-gradient-to-b from-card to-muted/20 p-4 shadow-sm space-y-4">
             <div className="flex items-center justify-between text-xs">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2.5">
                 {scanning ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+                  <div className="relative flex h-3.5 w-3.5 items-center justify-center">
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary/40" />
+                    <Loader2 className="h-3.5 w-3.5 animate-spin text-primary relative z-10" />
+                  </div>
                 ) : status?.status === "done" ? (
-                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+                  <CheckCircle2 className="h-4 w-4 text-emerald-500" />
                 ) : status?.status === "error" ? (
-                  <XCircle className="h-3.5 w-3.5 text-rose-600" />
+                  <XCircle className="h-4 w-4 text-rose-500" />
                 ) : null}
-                <span className="font-medium">{status?.step ?? "Working…"}</span>
+                <span className="font-semibold text-sm tracking-tight">{status?.step ?? "Initializing live scan..."}</span>
               </div>
               <div className="flex items-center gap-3 tabular-nums text-muted-foreground">
                 {scanning && scanElapsed > 0 && (() => {
@@ -793,22 +803,16 @@ export default function Home() {
                     if (s < 60) return `${s}s`;
                     return `${Math.floor(s / 60)}m ${s % 60}s`;
                   };
-                  // Use a CONVERGING estimate: once progress > 10%, compute
-                  // total estimated time = elapsed / (progress/100), then
-                  // remaining = total - elapsed. This converges as progress
-                  // increases, instead of growing like the old formula.
-                  // Before 10%, show a fixed "~30s" estimate based on typical scan time.
                   let estRemaining: number | null = null;
                   if (progress >= 10) {
                     const totalEstimate = scanElapsed / (progress / 100);
                     estRemaining = Math.max(0, Math.round(totalEstimate - scanElapsed));
                   } else if (scanElapsed > 3) {
-                    // Early stage — estimate ~40s total for a 1-page scan
                     estRemaining = Math.max(0, 40 - scanElapsed);
                   }
                   return (
-                    <span className="flex items-center gap-1.5">
-                      <Clock className="h-3 w-3" />
+                    <span className="flex items-center gap-1.5 rounded-full bg-muted/60 px-2.5 py-1 text-[11px] font-medium">
+                      <Clock className="h-3 w-3 text-primary" />
                       <span>{fmt(scanElapsed)}</span>
                       {estRemaining !== null && estRemaining > 0 && (
                         <span className="text-muted-foreground/70">· est. {fmt(estRemaining)} left</span>
@@ -816,67 +820,102 @@ export default function Home() {
                     </span>
                   );
                 })()}
-                <span className="font-medium text-foreground">{status?.progress ?? 0}%</span>
+                <span className="text-xs font-bold text-foreground bg-primary/10 px-2 py-0.5 rounded-full">{status?.progress ?? 0}%</span>
               </div>
             </div>
-            <Progress value={status?.progress ?? 0} className="h-2" />
-            {/* Per-site scraping progress — parse the step text to show
-                live status badges for each marketplace. The orchestrator
-                updates the step text every 3s with format like:
-                "Goofish: ⏳ scraping…  |  OLX: ✅ 87 listings  |  Vinted: ⏭️ skipped" */}
-            {scanning && status?.step && status.step.includes("|") && (() => {
-              const parts = status.step.split("|").map(s => s.trim());
-              return (
-                <div className="flex flex-wrap items-center gap-2 pt-1">
-                  {parts.map((part, i) => {
-                    const isRunning = part.includes("⏳");
-                    const isDone = part.includes("✅");
-                    const isError = part.includes("❌");
-                    const isSkipped = part.includes("⏭️");
-                    const siteName = part.split(":")[0]?.trim() || part;
+
+            {/* Glowing animated progress bar */}
+            <div className="relative h-2.5 w-full overflow-hidden rounded-full bg-muted">
+              <div
+                className={`h-full rounded-full transition-all duration-500 ease-out bg-gradient-to-r from-sky-500 via-indigo-500 to-emerald-500 ${
+                  scanning ? "shadow-[0_0_12px_rgba(99,102,241,0.6)]" : ""
+                }`}
+                style={{ width: `${Math.max(3, status?.progress ?? 0)}%` }}
+              />
+            </div>
+
+            {/* Live Per-Platform Scraping Cards */}
+            {scanning && status?.step && (
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-5 pt-1">
+                {(() => {
+                  const stepText = status.step;
+                  const parts = stepText.includes("|") ? stepText.split("|").map((s) => s.trim()) : [];
+                  const getPart = (name: string) => parts.find((p) => p.toLowerCase().includes(name.toLowerCase()));
+                  const platforms = [
+                    { name: "Goofish", flag: "🇨🇳", tag: "China (CNY)" },
+                    { name: "OLX", flag: "🇵🇹", tag: "OLX.pt" },
+                    { name: "Vinted", flag: "🇵🇹", tag: "Vinted.pt" },
+                    { name: "KuantoKusta", flag: "🇵🇹", tag: "New Retail" },
+                    { name: "Amazon", flag: "🇪🇸", tag: "Amazon.es" },
+                  ];
+
+                  return platforms.map((p) => {
+                    const match = getPart(p.name);
+                    const isRunning = match ? match.includes("⏳") : true;
+                    const isDone = match ? match.includes("✅") : false;
+                    const isError = match ? match.includes("❌") : false;
+                    const isSkipped = match ? match.includes("⏭️") : false;
+
+                    let statusText = "Preparing…";
+                    if (match) {
+                      const countMatch = match.match(/(\d+)\s+listings|(\d+)\s+comps/i);
+                      if (countMatch) {
+                        statusText = `${countMatch[1] || countMatch[2]} items`;
+                      } else if (isDone) statusText = "Done";
+                      else if (isSkipped) statusText = "Skipped";
+                      else if (isError) statusText = "Failed";
+                      else if (isRunning) statusText = "Scraping…";
+                    }
+
                     return (
-                      <span
-                        key={i}
-                        className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] font-medium ${
+                      <div
+                        key={p.name}
+                        className={`flex flex-col gap-1 rounded-lg border p-2.5 transition-all ${
                           isDone
-                            ? "border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300"
+                            ? "border-emerald-500/30 bg-emerald-500/5 dark:bg-emerald-950/20"
                             : isError
-                              ? "border-rose-300 bg-rose-50 text-rose-700 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-300"
+                              ? "border-rose-500/30 bg-rose-500/5 dark:bg-rose-950/20"
                               : isSkipped
-                                ? "border-muted bg-muted/40 text-muted-foreground"
-                                : isRunning
-                                  ? "border-sky-300 bg-sky-50 text-sky-700 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-300"
-                                  : "border-muted bg-muted/40 text-muted-foreground"
+                                ? "border-muted bg-muted/20 opacity-60"
+                                : "border-sky-500/30 bg-sky-500/5 animate-pulse"
                         }`}
                       >
-                        {isRunning && <Loader2 className="h-3 w-3 animate-spin" />}
-                        {isDone && <CheckCircle2 className="h-3 w-3" />}
-                        {isError && <XCircle className="h-3 w-3" />}
-                        {isSkipped && <span className="text-[10px]">⏭️</span>}
-                        {part}
-                      </span>
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-semibold flex items-center gap-1">
+                            <span>{p.flag}</span>
+                            <span>{p.name}</span>
+                          </span>
+                          {isRunning && <Loader2 className="h-3 w-3 animate-spin text-sky-500" />}
+                          {isDone && <CheckCircle2 className="h-3 w-3 text-emerald-500" />}
+                          {isError && <XCircle className="h-3 w-3 text-rose-500" />}
+                        </div>
+                        <div className="flex items-center justify-between text-[10px] text-muted-foreground mt-0.5">
+                          <span className="truncate">{p.tag}</span>
+                          <span className="font-medium text-foreground">{statusText}</span>
+                        </div>
+                      </div>
                     );
-                  })}
-                </div>
-              );
-            })()}
-            {/* Scan progress step indicators — labeled milestones showing
-                which pipeline phase is currently active. */}
+                  })();
+                })()}
+              </div>
+            )}
+
+            {/* Scan progress step indicators */}
             {scanning && (() => {
               const progress = status?.progress ?? 0;
               const currentStatus = status?.status ?? "";
               const steps = [
-                { key: "scraping_goofish", label: "Scrape", threshold: 0, icon: Search },
-                { key: "matching_eu", label: "Match EU", threshold: 40, icon: Globe },
-                { key: "calculating", label: "Calculate", threshold: 60, icon: Calculator },
-                { key: "done", label: "Done", threshold: 100, icon: CheckCircle2 },
+                { key: "scraping_goofish", label: "Scrape Platforms", threshold: 0, icon: Search },
+                { key: "matching_eu", label: "Match EU Comps", threshold: 40, icon: Globe },
+                { key: "calculating", label: "Profit Calc", threshold: 60, icon: Calculator },
+                { key: "done", label: "Complete", threshold: 100, icon: CheckCircle2 },
               ];
               const activeStepIdx = steps.findIndex((s, i) => {
                 if (i === steps.length - 1) return currentStatus === "done";
                 return progress < steps[i + 1].threshold;
               });
               return (
-                <div className="flex items-center justify-between px-1 pt-1">
+                <div className="flex items-center justify-between px-1 pt-2 border-t">
                   {steps.map((step, i) => {
                     const isDone = i < activeStepIdx || currentStatus === "done";
                     const isActive = i === activeStepIdx && currentStatus !== "done";
@@ -903,7 +942,7 @@ export default function Home() {
                           </div>
                           <span
                             className={`text-[10px] font-medium ${
-                              isActive ? "text-foreground" : isDone ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"
+                              isActive ? "text-foreground font-bold" : isDone ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"
                             }`}
                           >
                             {step.label}
@@ -958,7 +997,9 @@ export default function Home() {
             {result.warnings.length > 0 && (
               <Alert className="border-amber-300 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/40">
                 <AlertTriangle className="h-4 w-4 text-amber-600" />
-                <AlertTitle className="text-sm">Pipeline warnings</AlertTitle>
+                <AlertTitle className="text-sm">
+                  {result.warnings.length} {result.warnings.length === 1 ? "Pipeline Warning" : "Pipeline Warnings"}
+                </AlertTitle>
                 <AlertDescription>
                   <ul className="mt-1 space-y-0.5 text-xs text-amber-700 dark:text-amber-300">
                     {result.warnings.map((w, i) => (

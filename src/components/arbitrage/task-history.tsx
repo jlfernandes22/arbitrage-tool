@@ -237,6 +237,7 @@ export function TaskHistory({
               {tasks.map((t) => {
                 const isActive = t.task_id === activeTaskId;
                 const isDone = t.status === "done";
+                const isRunning = t.status !== "done" && t.status !== "error" && t.status !== "paused" && t.status !== "cancelled";
                 return (
                   <div
                     key={t.task_id}
@@ -244,7 +245,7 @@ export function TaskHistory({
                       isActive
                         ? "border-primary bg-primary/5"
                         : "border-border hover:bg-muted/50"
-                    } ${!isDone ? "opacity-60" : ""}`}
+                    }`}
                   >
                     <div className="flex items-center gap-1.5">
                       {statusIcon(t.status)}
@@ -259,11 +260,10 @@ export function TaskHistory({
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="h-5 w-5 shrink-0 opacity-0 transition-opacity group-hover:opacity-100"
+                        className="h-5 w-5 shrink-0 opacity-70 hover:opacity-100 group-hover:opacity-100"
                         onClick={(e) => {
                           e.stopPropagation();
                           onRerun(t);
-                          toast.info(`Re-running scan: "${t.query}"`);
                         }}
                         title="Re-run this scan"
                       >
@@ -273,7 +273,7 @@ export function TaskHistory({
                         <Button
                           variant="ghost"
                           size="icon"
-                          className="h-5 w-5 shrink-0 opacity-0 transition-opacity group-hover:opacity-100 text-muted-foreground hover:text-rose-600"
+                          className="h-5 w-5 shrink-0 opacity-70 hover:opacity-100 group-hover:opacity-100 text-muted-foreground hover:text-rose-600"
                           onClick={(e) => {
                             e.stopPropagation();
                             if (window.confirm(`Delete scan "${t.query}" from history? This cannot be undone.`)) {
