@@ -34,6 +34,7 @@ import {
 } from "lucide-react";
 import {
   type EvaluatedListing,
+  type EuMarketComp,
   CONDITION_LABELS,
   CONDITION_COLORS,
   eur,
@@ -41,6 +42,7 @@ import {
   cny,
 } from "./types";
 import { displayTitle as cleanDisplayTitle, translateConditionRaw } from "@/lib/engine/normalizer";
+import { ensureArray } from "@/lib/utils";
 
 // Normalize image URLs — ensures protocol-relative URLs (//img.alicdn.com/...)
 // get the https: prefix so they load correctly in all browsers.
@@ -87,7 +89,7 @@ export function ListingDetailDialog({
   const l = listing?.listing;
   const scam = listing?.scam;
   const profit = listing?.profit;
-  const euComps = listing?.euComps ?? [];
+  const euComps = ensureArray<EuMarketComp>(listing?.euComps);
   const n = l?.normalized ?? null;
   const landed = profit?.landed;
 

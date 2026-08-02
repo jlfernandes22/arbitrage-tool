@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getTask, setTask, appendLog } from "@/lib/task-store";
 import { resolveConfig } from "@/lib/config";
+import { ensureArray } from "@/lib/utils";
 import {
   detectScam,
   shouldHideByScam,
@@ -38,14 +39,14 @@ export async function POST(
   let task = getTask(id);
   let storedListings: EvaluatedListing[] | null = null;
   if (task?.result?.listings) {
-    storedListings = task.result.listings;
+    storedListings = ensureArray(task.result.listings);
   } else {
     // Try loading from DB
     try {
       const row = await db.task.findUnique({ where: { id } });
       if (row?.resultsJson) {
         const parsed = JSON.parse(row.resultsJson) as TaskResult;
-        storedListings = parsed.listings;
+        storedListings = ensureArray(parsed.listings);
         // Reconstruct a minimal TaskState in memory for logging
         if (!task) {
           task = {

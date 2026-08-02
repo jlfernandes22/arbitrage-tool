@@ -24,7 +24,7 @@ interface RefPrice {
   good: number;
   fair?: number;
 }
-const refPrices = referencePrices as Record<string, RefPrice>;
+const defaultRefPrices = referencePrices as Record<string, RefPrice>;
 // LAYER 1 — Critical Blacklist (Auto Drop)
 const CRITICAL_BLACKLIST = [
   { token: "组装", label: "assembled" },
@@ -197,8 +197,12 @@ function computeSellerTrustRisk(listing: GoofishListing): {
 export function detectScam(
   listing: GoofishListing,
   config: AppConfig,
-  _refPricesOverride?: Record<string, RefPrice>,
+  refPricesOverride?: Record<string, RefPrice>,
 ): ScamReport {
+  // Use DB-backed reference prices when provided, else fall back to static JSON.
+  // This ensures admin edits to the reference price matrix also affect scam
+  // detection (previously the override was accepted but never used).
+  const refPrices = refPricesOverride ?? defaultRefPrices;
   const reasons: string[] = [];
   const matchedBlacklist: string[] = [];
   const matchedYellow: string[] = [];

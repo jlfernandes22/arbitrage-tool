@@ -77,11 +77,13 @@ function median(values: number[]): number {
 }
 
 export function ProfitHeatmap({ listings, activeCell = null, onCellClick }: ProfitHeatmapProps) {
+  // Defensive guard: ensure listings is always an array.
+  const safe = Array.isArray(listings) ? listings : [];
   const { families, cells, maxProfit, minProfit } = useMemo(() => {
     // Group listings by family × condition
     const grid = new Map<string, EvaluatedListing[]>();
     const famSet = new Set<string>();
-    for (const l of listings) {
+    for (const l of safe) {
       const family = extractFamily(l.listing.normalized?.standardKey);
       const cond = l.listing.normalized?.condition ?? "unknown";
       famSet.add(family);
@@ -109,7 +111,7 @@ export function ProfitHeatmap({ listings, activeCell = null, onCellClick }: Prof
       }
     }
     return { families: famArr, cells, maxProfit: maxP === -Infinity ? 0 : maxP, minProfit: minP === Infinity ? 0 : minP };
-  }, [listings]);
+  }, [safe]);
 
   if (families.length === 0) return null;
 

@@ -490,13 +490,17 @@ function buildStandardKey(
   storageGB?: number,
   formFactor?: string,
   driveConfig?: string,
+  displayInch?: number,
 ): string {
   if (category === "ps5") {
     return `PlayStation 5 ${formFactor ?? "Standard"} ${driveConfig ?? "Disc"}`;
   }
   if (category === "macbook") {
-    // family already includes chip, e.g. "MacBook Air M2"
-    const disp = family.includes("Pro") ? "14" : "13";
+    // Use the detected display size when available (14, 16, 13, 15),
+    // otherwise fall back to sensible defaults per tier.
+    // Previously this ALWAYS hardcoded 14 for Pro and 13 for Air,
+    // which was wrong for 16" MacBook Pro listings.
+    const disp = displayInch ? String(displayInch) : (family.includes("Pro") ? "14" : "13");
     // Only include storage if explicitly detected — don't guess
     return storageGB ? `${family} ${disp} ${storageGB}GB` : `${family} ${disp}`;
   }
@@ -581,6 +585,7 @@ export function normalizeListing(
     storage?.storageGB,
     formFactor,
     driveConfig,
+    displayInch,
   );
   // Detect region version + lock status (primarily for iPhones/iPads, but
   // also applies to MacBooks — a US MacBook has a different keyboard layout).

@@ -24,7 +24,9 @@ interface RefPrice {
   good: number;
   fair?: number;
 }
-const refPrices = referencePrices as Record<string, RefPrice>;
+// Static fallback reference prices from JSON file. Used when the DB-backed
+// override is not provided (e.g., direct function calls without pipeline context).
+const defaultRefPrices = referencePrices as Record<string, RefPrice>;
 /**
  * Per-GB price delta used when interpolating reference prices across storage
  * tiers. Apple's pricing model roughly adds €50-100 per storage doubling, so
@@ -253,7 +255,7 @@ export function computeProfit(
     }
   }
   if (expectedResaleEur === 0 && product) {
-    const source = refPricesOverride ?? refPrices;
+    const source = refPricesOverride ?? defaultRefPrices;
     // Use the storage-aware lookup: finds the closest storage tier and
     // adjusts the price proportionally when the exact key isn't in the table.
     const entry = lookupRefPrice(source, product.standardKey, product.storageGB, product.family);

@@ -5,6 +5,8 @@
 // Used by the "Product Profit Trend" section below the results table.
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { ensureArray } from "@/lib/utils";
+import type { EvaluatedListing } from "@/lib/engine";
 
 export const dynamic = "force-dynamic";
 
@@ -53,7 +55,7 @@ export async function GET(request: Request) {
         try {
           if (!task.resultsJson) return null;
           const result = JSON.parse(task.resultsJson);
-          const listings = result.listings || [];
+          const listings = ensureArray<EvaluatedListing>(result.listings);
           if (listings.length === 0) return null;
 
           // Extract prices from viable (non-hidden) listings

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getTask, setTask, type TaskState } from "@/lib/task-store";
+import { ensureArray } from "@/lib/utils";
 import type { TaskResult } from "@/lib/engine";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -37,7 +38,25 @@ export async function GET(
     try {
       const row = await db.task.findUnique({ where: { id } });
       if (row?.resultsJson) {
-        const parsed = JSON.parse(row.resultsJson) as TaskResult;
+        let parsed = JSON.parse(row.resultsJson) as TaskResult;
+        // ── Validate parsed shape: guard against malformed DB JSON ──
+        // If listings is not an array (e.g., partial write, corruption),
+        // replace it with an empty array to prevent downstream .map() crashes.
+        if (!parsed || typeof parsed !== "object") {
+          parsed = {} as TaskResult;
+        }
+        if (!Array.isArray(parsed.listings)) {
+          parsed.listings = [];
+        }
+        if (!parsed.summary || typeof parsed.summary !== "object") {
+          parsed.summary = {
+            total: 0, shown: 0, hiddenScam: 0, hiddenProfit: 0,
+            avgMarginPct: 0, avgRiskScore: 0, bestProfitEur: 0, bestMarginPct: 0,
+          };
+        }
+        if (!Array.isArray(parsed.warnings)) {
+          parsed.warnings = [];
+        }
         task = {
           id: row.id,
           query: row.query,
@@ -73,11 +92,14 @@ export async function GET(
     );
   }
   const includeHidden = req.nextUrl.searchParams.get("include_hidden") === "1";
+  // Guard: ensureArray handles corrupted DB data where listings may be a plain
+  // object with numeric keys instead of a real array (causes .map() TypeError).
+  const safeListings = ensureArray(task.result.listings);
   const result = {
     ...task.result,
     listings: includeHidden
-      ? task.result.listings
-      : task.result.listings.filter((l) => !l.hidden),
+      ? safeListings
+      : safeListings.filter((l) => !l.hidden),
   };
   return NextResponse.json(result);
 }

@@ -16,11 +16,38 @@ const store: Map<string, TaskState> =
 globalForTasks.__arbitrageTaskStore = store;
 // Cap logs to prevent unbounded memory growth during long pipelines.
 const MAX_LOGS = 400;
+// Eviction: completed/error/cancelled tasks older than this are removed from
+// memory. They remain in SQLite for history. Prevents unbounded memory growth
+// when users run hundreds of scans in a single session.
+const COMPLETED_TASK_TTL_MS = 10 * 60 * 1000; // 10 minutes
+// Check eviction on every 50th mutation (not every single one for perf).
+let mutationCount = 0;
+function evictCompletedTasks(): void {
+  const now = Date.now();
+  const expired: string[] = [];
+  store.forEach((task, id) => {
+    if (
+      task.status === "done" ||
+      task.status === "error" ||
+      task.status === "cancelled"
+    ) {
+      const finished = task.finishedAt ?? task.startedAt;
+      if (now - finished > COMPLETED_TASK_TTL_MS) {
+        expired.push(id);
+      }
+    }
+  });
+  for (const id of expired) {
+    store.delete(id);
+  }
+}
 export function getTask(id: string): TaskState | undefined {
   return store.get(id);
 }
 export function setTask(id: string, state: TaskState): void {
   store.set(id, state);
+  mutationCount++;
+  if (mutationCount % 50 === 0) evictCompletedTasks();
 }
 export function updateTask(
   id: string,
@@ -30,6 +57,8 @@ export function updateTask(
   if (!cur) return undefined;
   const next = { ...cur, ...patch };
   store.set(id, next);
+  mutationCount++;
+  if (mutationCount % 50 === 0) evictCompletedTasks();
   return next;
 }
 /**

@@ -57,8 +57,12 @@ function shortLabel(n: EvaluatedListing, idx: number): string {
 }
 export function ProfitChart({ listings }: ProfitChartProps) {
   const theme = useChartTheme();
+  // Defensive guard: ensure listings is always an array.
+  // If the parent passes raw result.listings (not through safeListings),
+  // this prevents the .map() TypeError crash.
+  const safe = Array.isArray(listings) ? listings : [];
   const data: ChartDatum[] = useMemo(() => {
-    return listings.map((l, idx) => ({
+    return safe.map((l, idx) => ({
       name: l.listing.normalized?.standardKey ?? l.listing.title,
       shortName: shortLabel(l, idx),
       netProfit: Math.round(l.profit.netProfitEur),
@@ -66,7 +70,7 @@ export function ProfitChart({ listings }: ProfitChartProps) {
       risk: l.scam.riskScore,
       hidden: l.hidden,
     }));
-  }, [listings]);
+  }, [safe]);
   const viable = data.filter((d) => !d.hidden);
   const bestProfit = viable.length > 0 ? Math.max(...viable.map((d) => d.netProfit)) : 0;
   const barColor = (d: ChartDatum) => {
@@ -75,7 +79,7 @@ export function ProfitChart({ listings }: ProfitChartProps) {
     if (d.netProfit > 0) return "#f59e0b"; // amber-500
     return "#ef4444"; // red-500
   };
-  if (listings.length === 0) {
+  if (safe.length === 0) {
     return null;
   }
   return (

@@ -10,6 +10,8 @@ function csvEscape(v: string | number | undefined | null): string {
   return s;
 }
 export function listingsToCsv(listings: EvaluatedListing[]): string {
+  // Defensive guard: ensure listings is always an array
+  if (!Array.isArray(listings)) listings = [];
   // Headers include the decision-critical fields that were previously
   // omitted: regionVersion, lockStatus (a locked CN iPhone is worthless in
   // PT), sellerRating, conditionFlags, href, description. Without these the
@@ -138,6 +140,8 @@ export function exportListingsCsv(listings: EvaluatedListing[], query: string): 
 // shape: listing metadata, normalized product, scam report, profit
 // analysis with landed cost breakdown, and EU comps.
 export function listingsToJson(listings: EvaluatedListing[], query: string): string {
+  // Defensive guard: ensure listings is always an array
+  if (!Array.isArray(listings)) listings = [];
   const payload = {
     meta: {
       query,

@@ -33,6 +33,7 @@ import { scrapeKuantokusta } from "@/lib/scrapers/kuantokusta";
 import { scrapeAmazon } from "@/lib/scrapers/amazon";
 import { getReferencePrices } from "@/lib/reference-prices";
 import { getTask, setTask, updateTask, appendLog, isCancelRequested, type TaskState } from "@/lib/task-store";
+import { ensureArray } from "@/lib/utils";
 async function mapWithConcurrency<T, R>(
   items: T[],
   limit: number,
@@ -410,7 +411,9 @@ export async function runPipeline(taskId: string): Promise<void> {
     ]);
     // Stop the per-site progress updates — all scrapers are done
     stopProgress();
-    let listings = goofishListings;
+    // Defensive guard: scraper should always return an array, but if corrupted
+    // data somehow produced a plain object, ensureArray prevents .map() crashes.
+    let listings = ensureArray(goofishListings);
     appendLog(taskId, "INFO", `[Forex] CNY→EUR rate=${forex.rate} (source: ${forex.source})`);
     if (forex.source === "fallback") {
       warnings.push(`Forex API unreachable; using fallback rate ${forex.rate}.`);
