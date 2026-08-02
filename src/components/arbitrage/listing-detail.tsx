@@ -92,6 +92,12 @@ export function ListingDetailDialog({
   const euComps = ensureArray<EuMarketComp>(listing?.euComps);
   const n = l?.normalized ?? null;
   const landed = profit?.landed;
+  // Defensive guards for nested arrays that may not be real arrays
+  // (e.g., DB corruption producing objects with numeric keys).
+  const safeImageUrls = Array.isArray(l?.imageUrls) ? l.imageUrls : [];
+  const safeConditionFlags = Array.isArray(l?.conditionFlags) ? l.conditionFlags : [];
+  const safeYellowTokens = Array.isArray(scam?.matchedYellowTokens) ? scam.matchedYellowTokens : [];
+  const safeScamReasons = Array.isArray(scam?.reasons) ? scam.reasons : [];
 
   const doTranslate = useCallback(
     async (force = false) => {
@@ -335,9 +341,9 @@ export function ListingDetailDialog({
                     />
                   </div>
                   {/* Thumbnail strip — only show if more than 1 image */}
-                  {l.imageUrls.length > 1 && (
+                  {safeImageUrls.length > 1 && (
                     <div className="flex gap-2 overflow-x-auto pb-1">
-                      {l.imageUrls.map((url, idx) => (
+                      {safeImageUrls.map((url, idx) => (
                         <button
                           key={idx}
                           onClick={() => setSelectedImage(idx)}
@@ -530,14 +536,14 @@ export function ListingDetailDialog({
                 Sourced from BOTH the enriched conditionFlags (from listing
                 detail page) AND the scam detector's yellow tokens (from
                 title/description text). Deduplicated. */}
-            {(l.conditionFlags?.length || scam.matchedYellowTokens.length) ? (
+            {(safeConditionFlags.length || safeYellowTokens.length) ? (
               <section className="min-w-0 rounded-lg border bg-muted/30 p-3">
                 <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                   Condition Flags
                 </h4>
                 <div className="flex flex-wrap gap-1.5">
                   {/* Enriched condition flags from the listing detail page */}
-                  {l.conditionFlags?.map((flag) => {
+                  {safeConditionFlags.map((flag) => {
                     const isPositive = flag === "All Original" || flag === "Original" || flag === "Never Opened" || flag === "No Water Damage";
                     const isNegative = flag === "Battery Replaced" || flag === "Screen Replaced" ||
                       flag === "No Box" || flag === "Water Damage" || flag === "Screen Leak" ||
@@ -559,8 +565,8 @@ export function ListingDetailDialog({
                     );
                   })}
                   {/* Yellow modifier tokens from the scam detector (from text) */}
-                  {scam.matchedYellowTokens
-                    .filter((t) => !l.conditionFlags?.some((f) => t.includes(f)))
+                  {safeYellowTokens
+                    .filter((t) => !safeConditionFlags.some((f) => t.includes(f)))
                     .map((token) => (
                       <Badge
                         key={token}
@@ -695,9 +701,9 @@ export function ListingDetailDialog({
                   </Badge>
                 )}
               </div>
-              {scam.reasons.length > 0 ? (
+              {safeScamReasons.length > 0 ? (
                 <ul className="space-y-1 text-xs">
-                  {scam.reasons.map((r, i) => (
+                  {safeScamReasons.map((r, i) => (
                     <li key={i} className="flex gap-2">
                       <span className="text-muted-foreground">•</span>
                       <span>{r}</span>

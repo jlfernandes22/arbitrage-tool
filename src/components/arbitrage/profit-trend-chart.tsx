@@ -71,7 +71,7 @@ export function ProfitTrendChart({ tasks, refreshKey }: ProfitTrendChartProps) {
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         if (cancelled || !data) return;
-        setFetched((data.tasks ?? []) as HistoryTask[]);
+        setFetched((Array.isArray(data.tasks) ? data.tasks : []) as HistoryTask[]);
       })
       .catch(() => {});
     return () => {

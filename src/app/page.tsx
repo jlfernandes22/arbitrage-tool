@@ -163,7 +163,7 @@ export default function Home() {
           const data: TaskStatusResponse = await res.json();
           if (!mountedRef.current) return;
           setStatus(data);
-          setLogs(data.logs ?? []);
+          setLogs(Array.isArray(data.logs) ? data.logs : []);
           if (data.status === "done") {
             stopPolling();
             setScanning(false);

@@ -225,22 +225,24 @@ export function listingsToJson(listings: EvaluatedListing[], query: string): str
             totalLandedCostEur: l.profit.landed.totalLandedCostEur,
           },
         },
-        euComps: l.euComps.map((c) => ({
-          platform: c.platform,
-          title: c.title,
-          priceEur: c.priceEur,
-          condition: c.condition,
-          location: c.location ?? null,
-          // Previously omitted — these distinguish retail vs peer-to-peer
-          // and carry seller-quality signal.
-          vendorType: c.vendorType ?? null,
-          brand: c.brand ?? null,
-          sellerStars: c.sellerStars ?? null,
-          bundleDiscount: c.bundleDiscount ?? null,
-          negotiable: c.negotiable ?? null,
-          viewCount: c.viewCount ?? null,
-          isRetail: c.isRetail ?? (c.platform === "kuantokusta" || c.platform === "amazon"),
-        })),
+        euComps: Array.isArray(l.euComps)
+          ? l.euComps.map((c) => ({
+              platform: c.platform,
+              title: c.title,
+              priceEur: c.priceEur,
+              condition: c.condition,
+              location: c.location ?? null,
+              // Previously omitted — these distinguish retail vs peer-to-peer
+              // and carry seller-quality signal.
+              vendorType: c.vendorType ?? null,
+              brand: c.brand ?? null,
+              sellerStars: c.sellerStars ?? null,
+              bundleDiscount: c.bundleDiscount ?? null,
+              negotiable: c.negotiable ?? null,
+              viewCount: c.viewCount ?? null,
+              isRetail: c.isRetail ?? (c.platform === "kuantokusta" || c.platform === "amazon"),
+            }))
+          : [],
         hidden: l.hidden,
         hiddenReason: l.hiddenReason ?? null,
       };

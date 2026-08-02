@@ -24,6 +24,9 @@ function formatTime(ts: number): string {
   });
 }
 export function TerminalConsole({ logs, onClear, active }: TerminalConsoleProps) {
+  // Defensive guard: ensure logs is always a real array.
+  // If the API returns a plain object (DB corruption), fall back to [].
+  const safeLogs = Array.isArray(logs) ? logs : [];
   const scrollRef = useRef<HTMLDivElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
   // Auto-scroll to bottom when new logs arrive
@@ -95,7 +98,7 @@ export function TerminalConsole({ logs, onClear, active }: TerminalConsoleProps)
           scrollbarColor: "#475569 #020617",
         }}
       >
-        {logs.length === 0 ? (
+        {safeLogs.length === 0 ? (
           <div className="flex h-24 items-center justify-center text-slate-600">
             <span className="text-xs">
               {active ? "waiting for backend output…" : "no logs yet — run a scan to see execution telemetry"}
@@ -103,7 +106,7 @@ export function TerminalConsole({ logs, onClear, active }: TerminalConsoleProps)
           </div>
         ) : (
           <div className="space-y-0.5">
-            {logs.map((log, i) => {
+            {safeLogs.map((log, i) => {
               const style = LEVEL_STYLES[log.level];
               return (
                 <div

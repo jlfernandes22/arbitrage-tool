@@ -57,6 +57,23 @@ export async function GET(
         if (!Array.isArray(parsed.warnings)) {
           parsed.warnings = [];
         }
+        // ── Deep validation: guard nested arrays inside each listing ──
+        // If DB JSON corruption produced objects-with-numeric-keys for any
+        // sub-array (euComps, imageUrls, conditionFlags, scam.reasons, etc.),
+        // replace them with real [] to prevent downstream .map() crashes.
+        if (Array.isArray(parsed.listings)) {
+          for (const listing of parsed.listings) {
+            if (listing && typeof listing === "object") {
+              if (!Array.isArray(listing.euComps)) listing.euComps = [];
+              if (!Array.isArray(listing.imageUrls)) listing.imageUrls = [];
+              if (!Array.isArray(listing.conditionFlags)) listing.conditionFlags = [];
+              if (listing.scam && typeof listing.scam === "object") {
+                if (!Array.isArray(listing.scam.reasons)) listing.scam.reasons = [];
+                if (!Array.isArray(listing.scam.matchedYellowTokens)) listing.scam.matchedYellowTokens = [];
+              }
+            }
+          }
+        }
         task = {
           id: row.id,
           query: row.query,
@@ -95,6 +112,18 @@ export async function GET(
   // Guard: ensureArray handles corrupted DB data where listings may be a plain
   // object with numeric keys instead of a real array (causes .map() TypeError).
   const safeListings = ensureArray(task.result.listings);
+  // Second pass: deep-validate nested arrays for live (non-DB) tasks too.
+  for (const listing of safeListings) {
+    if (listing && typeof listing === "object") {
+      if (!Array.isArray(listing.euComps)) listing.euComps = [];
+      if (!Array.isArray(listing.imageUrls)) listing.imageUrls = [];
+      if (!Array.isArray(listing.conditionFlags)) listing.conditionFlags = [];
+      if (listing.scam && typeof listing.scam === "object") {
+        if (!Array.isArray(listing.scam.reasons)) listing.scam.reasons = [];
+        if (!Array.isArray(listing.scam.matchedYellowTokens)) listing.scam.matchedYellowTokens = [];
+      }
+    }
+  }
   const result = {
     ...task.result,
     listings: includeHidden

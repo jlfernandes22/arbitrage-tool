@@ -154,7 +154,7 @@ export function ProductTrend({ defaultQuery }: { defaultQuery?: string }) {
   };
 
   // Calculate min/max for chart scaling
-  const points = data?.trend ?? [];
+  const points = Array.isArray(data?.trend) ? data.trend : [];
   const profits = points.map((p) => p.medianProfitEur).filter((v) => v !== 0);
   const maxProfit = profits.length > 0 ? Math.max(...profits) : 0;
   const minProfit = profits.length > 0 ? Math.min(...profits, 0) : 0;
