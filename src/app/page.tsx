@@ -85,6 +85,7 @@ import { ProfitHeatmap, extractFamily } from "@/components/arbitrage/profit-heat
 import { ProductTrend } from "@/components/arbitrage/product-trend";
 import { ReferenceEditor } from "@/components/arbitrage/reference-editor";
 import { exportListingsCsv, exportListingsJson } from "@/components/arbitrage/csv-export";
+import { ensureArray } from "@/lib/utils";
 import { useSavedQueries } from "@/hooks/use-saved-queries";
 import { useKeyboardShortcuts, SHORTCUTS_HELP } from "@/hooks/use-keyboard-shortcuts";
 import type { ResultsTableHandle } from "@/components/arbitrage/results-table";
@@ -114,6 +115,11 @@ export default function Home() {
   // elapsed time and estimate remaining time based on progress.
   const scanStartedAtRef = useRef<number | null>(null);
   const [scanElapsed, setScanElapsed] = useState<number>(0);
+  // Smoothed ETA estimate to prevent the +9s-per-second bug.
+  // Uses exponential moving average (α=0.3) so the estimate converges
+  // as progress advances, and caps growth so ETA never increases
+  // faster than real elapsed time.
+  const etaRef = useRef<number | null>(null);
   // Tracks whether the component is mounted to prevent setState after unmount
   // (e.g. if a fetch resolves after navigation away).
   const mountedRef = useRef(true);
@@ -244,6 +250,7 @@ export default function Home() {
       setLogs([]);
       scanStartedAtRef.current = Date.now();
       setScanElapsed(0);
+      etaRef.current = null; // reset ETA for new scan
       setHistoryRefreshKey((k) => k + 1); // refresh history so the new in-progress task appears
       try {
         const res = await fetch("/api/tasks/submit", {
@@ -398,6 +405,31 @@ export default function Home() {
     },
     [taskId, stopPolling],
   );
+  // Clear all history (both in-memory store + SQLite DB).
+  const handleClearAll = useCallback(async () => {
+    try {
+      // If there's an active task, stop it first
+      if (taskId) {
+        stopPolling();
+        fetch(`/api/tasks/cancel/${taskId}`, { method: "POST" }).catch(() => {});
+        setScanning(false);
+        setResult(null);
+        setStatus(null);
+        setTaskId(null);
+        setLogs([]);
+      }
+      const res = await fetch("/api/tasks/clear-all", { method: "DELETE" });
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}));
+        throw new Error(e.error ?? "clear failed");
+      }
+      const data = await res.json();
+      toast.success(`Cleared ${data.memDeleted + data.dbDeleted} scans from history`);
+      setHistoryRefreshKey((k) => k + 1);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to clear history");
+    }
+  }, [taskId, stopPolling]);
   // Re-evaluate: re-run profit calc on the current task's stored listings
   // using current reference prices + config, WITHOUT re-scraping. Useful
   // after editing the reference price matrix or adjusting config overrides.
@@ -568,6 +600,7 @@ export default function Home() {
                       toast.success(wasSaved ? "Query unpinned" : "Query pinned to sidebar");
                     }}
                     onDeleteTask={handleDeleteTask}
+                    onClearAll={handleClearAll}
                   />
                 </div>
               </SheetContent>
@@ -645,11 +678,12 @@ export default function Home() {
                   toast.success(wasSaved ? "Query unpinned" : "Query pinned to sidebar");
                 }}
                 onDeleteTask={handleDeleteTask}
+                onClearAll={handleClearAll}
               />
             </div>
             {/* ── EU Market Comp Links (below scan history in sidebar) ── */}
             {safeListings.length > 0 && (() => {
-              const allComps = safeListings.flatMap((l) => l.euComps ?? []);
+              const allComps = safeListings.flatMap((l) => ensureArray(l.euComps));
               const seen = new Set<string>();
               const deduped = allComps.filter((c) => {
                 const key = `${c.platform}:${c.title}:${c.priceEur}`;
@@ -827,11 +861,26 @@ export default function Home() {
                     return `${Math.floor(s / 60)}m ${s % 60}s`;
                   };
                   let estRemaining: number | null = null;
-                  if (progress >= 10) {
-                    const totalEstimate = scanElapsed / (progress / 100);
-                    estRemaining = Math.max(0, Math.round(totalEstimate - scanElapsed));
-                  } else if (scanElapsed > 3) {
-                    estRemaining = Math.max(0, 40 - scanElapsed);
+                  if (progress > 10 && progress < 100) {
+                    // Linear extrapolation: at 50% after 20s → total ~40s → 20s left.
+                    const naiveRemaining = scanElapsed / (progress / 100) - scanElapsed;
+                    if (etaRef.current === null) {
+                      // First real estimate — cap at 2× elapsed so it
+                      // doesn't start with an absurdly high number.
+                      etaRef.current = Math.min(naiveRemaining, scanElapsed * 2);
+                    } else {
+                      // Exponential moving average (α=0.3) to smooth
+                      // out progress jumps between steps.
+                      const alpha = 0.3;
+                      const smoothed = alpha * naiveRemaining + (1 - alpha) * etaRef.current;
+                      // Hard cap: ETA must never increase, only decrease.
+                      etaRef.current = Math.min(smoothed, Math.max(0, etaRef.current));
+                    }
+                    estRemaining = Math.max(0, Math.round(etaRef.current));
+                  } else if (progress <= 10 && scanElapsed > 3) {
+                    // Before scrapers report first progress, show a
+                    // conservative countdown (60s is a reasonable default).
+                    estRemaining = Math.max(0, Math.round(60 - scanElapsed));
                   }
                   return (
                     <span className="flex items-center gap-1.5 rounded-full bg-muted/60 px-2.5 py-1 text-[11px] font-medium">
@@ -935,8 +984,8 @@ export default function Home() {
               const currentStatus = status?.status ?? "";
               const steps = [
                 { key: "scraping_goofish", label: "Scrape Platforms", threshold: 0, icon: Search },
-                { key: "matching_eu", label: "Match EU Comps", threshold: 40, icon: Globe },
-                { key: "calculating", label: "Profit Calc", threshold: 60, icon: Calculator },
+                { key: "matching_eu", label: "Match EU Comps", threshold: 55, icon: Globe },
+                { key: "calculating", label: "Profit Calc", threshold: 72, icon: Calculator },
                 { key: "done", label: "Complete", threshold: 100, icon: CheckCircle2 },
               ];
               const activeStepIdx = steps.findIndex((s, i) => {
@@ -1051,7 +1100,7 @@ export default function Home() {
               // Aggregate all EU comps from all evaluated listings.
               // Dedupe by title+price so the same comp attached to multiple
               // Goofish listings isn't double-counted in the market preview.
-              const allComps = safeListings.flatMap((l) => l.euComps ?? []);
+              const allComps = safeListings.flatMap((l) => ensureArray(l.euComps));
               const seen = new Set<string>();
               const deduped = allComps.filter((c) => {
                 const key = `${c.platform}:${c.title}:${c.priceEur}`;
@@ -1225,23 +1274,47 @@ export default function Home() {
                   {/* ── New vs Used comparison ─────────────────────────── */}
                   {newMedian > 0 && usedMedian > 0 && (
                     <div className="flex flex-wrap items-center gap-3 rounded-lg border border-emerald-200 bg-emerald-50/40 px-3 py-2.5 dark:border-emerald-900 dark:bg-emerald-950/20">
-                      <div className="flex items-center gap-1.5">
-                        <ArrowDownRight className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
-                        <span className="text-xs font-semibold text-emerald-700 dark:text-emerald-300">
-                          Used is {usedDiscountPct}% cheaper than new
-                        </span>
-                      </div>
-                      <div className="flex items-baseline gap-1.5 text-xs tabular-nums">
-                        <span className="text-muted-foreground">New €{newMedian}</span>
-                        <ArrowRight className="h-3 w-3 text-muted-foreground" />
-                        <span className="font-semibold text-teal-600 dark:text-teal-400">Used €{usedMedian}</span>
-                        <span className="ml-1 rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
-                          −€{newVsUsedDelta}
-                        </span>
-                      </div>
-                      <span className="ml-auto text-[10px] text-muted-foreground">
-                        Buying second-hand saves ~€{newVsUsedDelta} vs retail on this product
-                      </span>
+                      {newVsUsedDelta >= 0 ? (
+                        <>
+                          <div className="flex items-center gap-1.5">
+                            <ArrowDownRight className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                            <span className="text-xs font-semibold text-emerald-700 dark:text-emerald-300">
+                              Used is {usedDiscountPct}% cheaper than new
+                            </span>
+                          </div>
+                          <div className="flex items-baseline gap-1.5 text-xs tabular-nums">
+                            <span className="text-muted-foreground">New €{newMedian}</span>
+                            <ArrowRight className="h-3 w-3 text-muted-foreground" />
+                            <span className="font-semibold text-teal-600 dark:text-teal-400">Used €{usedMedian}</span>
+                            <span className="ml-1 rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
+                              −€{newVsUsedDelta}
+                            </span>
+                          </div>
+                          <span className="ml-auto text-[10px] text-muted-foreground">
+                            Buying second-hand saves ~€{newVsUsedDelta} vs retail on this product
+                          </span>
+                        </>
+                      ) : (
+                        <>
+                          <div className="flex items-center gap-1.5">
+                            <ArrowDownRight className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+                            <span className="text-xs font-semibold text-amber-700 dark:text-amber-300">
+                              New is {Math.abs(usedDiscountPct)}% cheaper than used
+                            </span>
+                          </div>
+                          <div className="flex items-baseline gap-1.5 text-xs tabular-nums">
+                            <span className="text-muted-foreground">Used €{usedMedian}</span>
+                            <ArrowRight className="h-3 w-3 text-muted-foreground" />
+                            <span className="font-semibold text-sky-600 dark:text-sky-400">New €{newMedian}</span>
+                            <span className="ml-1 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-700 dark:bg-amber-950 dark:text-amber-300">
+                              −€{Math.abs(newVsUsedDelta)}
+                            </span>
+                          </div>
+                          <span className="ml-auto text-[10px] text-muted-foreground">
+                            Buying new saves ~€{Math.abs(newVsUsedDelta)} vs second-hand on this product
+                          </span>
+                        </>
+                      )}
                     </div>
                   )}
 
@@ -1479,7 +1552,7 @@ export default function Home() {
             The user can search for any product and see how its median
             Goofish price, EU resale price, and net profit have changed
             over time. Pre-fills with the current scan's query. */}
-        <ProductTrend defaultQuery={result?.query || query} />
+        <ProductTrend defaultQuery={result?.query || query} refreshKey={historyRefreshKey} />
           </div>
         </div>
       </main>

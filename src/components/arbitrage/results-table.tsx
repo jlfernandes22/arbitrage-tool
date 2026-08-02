@@ -707,7 +707,7 @@ export const ResultsTable = forwardRef<ResultsTableHandle, ResultsTableProps>(fu
                               Risk Score: {riskScore}/100
                               {riskDropped ? " (DROPPED)" : riskScore >= 60 ? " — High risk" : riskScore >= 40 ? " — Moderate risk" : " — Low risk"}
                             </p>
-                            {l?.scam?.reasons && l.scam.reasons.length > 0 ? (
+                            {l?.scam?.reasons && Array.isArray(l.scam.reasons) && l.scam.reasons.length > 0 ? (
                               <ul className="space-y-0.5">
                                 {l.scam.reasons.map((reason, ri) => (
                                   <li key={ri} className="flex gap-1.5 text-[10px] text-muted-foreground">

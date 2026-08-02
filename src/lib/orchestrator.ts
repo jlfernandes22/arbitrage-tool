@@ -18,6 +18,8 @@ import {
   filterRelevantComps,
   getCnyToEurRate,
   buildEuQuery,
+  buildCategoryEuQuery,
+  isTitleRelevantForCategory,
   type AppConfig,
   type Category,
   type EvaluatedListing,
@@ -274,6 +276,13 @@ export async function runPipeline(taskId: string): Promise<void> {
       return `Scraping ${active.join(" + ")} concurrently (${skipped.join(" + ")} skipped)…`;
     })();
     patch({ status: "scraping_goofish", progress: 5, step: stepLabel });
+    // ── Category-aware EU query refinement ────────────────────────────
+    // EU scrapers run concurrently with Goofish, so we don't have a
+    // NormalizedProduct yet. But we DO know the category + raw query.
+    // Use buildCategoryEuQuery to produce a cleaner search term for
+    // EU marketplaces (e.g., ensures "PlayStation 5" prefix for ps5).
+    const euQuery = buildCategoryEuQuery(state.category, state.query);
+    appendLog(taskId, "INFO", `[Config] EU search query refined: "${euQuery}" (category=${state.category})`);
     // ── Per-site progress tracking ──────────────────────────────────
     // Updates the step text every few seconds so the user can see which
     // sites are still running vs done. This makes it obvious if one site
@@ -298,45 +307,80 @@ export async function runPipeline(taskId: string): Promise<void> {
     let degraded = false;
     // Forex (needed for profit calc, fetch in parallel with scrapers)
     const forexPromise = getCnyToEurRate();
+    // ── Per-scraper progress: scraping phase occupies 10%–55% ──────
+    // Each scraper calls updateScrapeProgress() when done, bumping the
+    // progress bar so the user sees incremental progress instead of being
+    // stuck at 10% until the last (slowest) scraper finishes.
+    const activeScraperKeys: string[] = ["goofish"];
+    if (!skipOlx) activeScraperKeys.push("olx");
+    if (!skipVinted) activeScraperKeys.push("vinted");
+    if (!skipKk) activeScraperKeys.push("kk");
+    if (!skipAmazon) activeScraperKeys.push("amazon");
+    const activeCount = activeScraperKeys.length;
+    const scrapeProgressRange = 45; // 10% → 55%
+    const perScraperIncrement = Math.round(scrapeProgressRange / activeCount);
+    let completedScrapers = 0;
+    const updateScrapeProgress = () => {
+      completedScrapers++;
+      const newProgress = 10 + Math.min(completedScrapers * perScraperIncrement, scrapeProgressRange);
+      patch({ progress: newProgress });
+    };
     // ── Goofish (source listings) ──
     const goofishPromise = (async () => {
-      if (state.manualHtml && state.manualHtml.trim().length > 0) {
-        appendLog(taskId, "INFO", "[Goofish] Manual paste mode");
-        const { parseManualPasteHtml } = await import("@/lib/scrapers/goofish");
-        const parsed = parseManualPasteHtml(state.manualHtml, state.query);
-        appendLog(taskId, "SUCCESS", `[Goofish] ${parsed.length} listings from manual paste`);
+      try {
+        if (state.manualHtml && state.manualHtml.trim().length > 0) {
+          appendLog(taskId, "INFO", "[Goofish] Manual paste mode");
+          const { parseManualPasteHtml } = await import("@/lib/scrapers/goofish");
+          const parsed = parseManualPasteHtml(state.manualHtml, state.query);
+          appendLog(taskId, "SUCCESS", `[Goofish] ${parsed.length} listings from manual paste`);
+          siteProgress.goofish.status = "done";
+          siteProgress.goofish.count = parsed.length;
+          updateScrapeProgress();
+          return parsed;
+        }
+        appendLog(taskId, "INFO", `[Goofish] Searching goofish.com for "${state.query}" (up to ${goofishPages} pages)…`);
+        const r = await scrapeGoofish(state.query, state.category, {
+          minPriceCny: cfg.scraping.min_price_cny,
+          maxPriceCny: cfg.scraping.max_price_cny,
+          maxPages: goofishPages,
+          enrichAll: cfg.scraping.enrich_all === true,
+        });
+        if (r.warning) { warnings.push(r.warning); appendLog(taskId, "WARN", `[Goofish] ${r.warning}`); }
+        if (r.liveFetchStatus) appendLog(taskId, "INFO", `[Goofish] ${r.liveFetchStatus}`);
+        if (r.degraded) degraded = true;
+        appendLog(taskId, "SUCCESS", `[Goofish] ${r.listings.length} listings acquired`);
         siteProgress.goofish.status = "done";
-        siteProgress.goofish.count = parsed.length;
-        return parsed;
+        siteProgress.goofish.count = r.listings.length;
+        updateScrapeProgress();
+        return r.listings;
+      } catch (err) {
+        appendLog(taskId, "ERROR", `[Goofish] Scraper failed: ${err instanceof Error ? err.message : String(err)}`);
+        siteProgress.goofish.status = "error";
+        updateScrapeProgress();
+        return [];
       }
-      appendLog(taskId, "INFO", `[Goofish] Searching goofish.com for "${state.query}" (up to ${goofishPages} pages)…`);
-      const r = await scrapeGoofish(state.query, state.category, {
-        minPriceCny: cfg.scraping.min_price_cny,
-        maxPriceCny: cfg.scraping.max_price_cny,
-        maxPages: goofishPages,
-        enrichAll: cfg.scraping.enrich_all === true,
-      });
-      if (r.warning) { warnings.push(r.warning); appendLog(taskId, "WARN", `[Goofish] ${r.warning}`); }
-      if (r.liveFetchStatus) appendLog(taskId, "INFO", `[Goofish] ${r.liveFetchStatus}`);
-      if (r.degraded) degraded = true;
-      appendLog(taskId, "SUCCESS", `[Goofish] ${r.listings.length} listings acquired`);
-      siteProgress.goofish.status = "done";
-      siteProgress.goofish.count = r.listings.length;
-      return r.listings;
     })();
     // ── OLX (EU comps) — skippable via config flag ──
     const olxPromise: Promise<EuMarketComp[]> = skipOlx
       ? Promise.resolve([])
       : (async () => {
-          appendLog(taskId, "INFO", `[OLX] Searching olx.pt for "${state.query}" (up to ${olxPages} pages)…`);
-          const r = await scrapeOlx(null, state.query, { maxPages: olxPages });
-          if (r.liveFetchStatus) appendLog(taskId, "INFO", `[OLX] ${r.liveFetchStatus}`);
-          appendLog(taskId, "SUCCESS", `[OLX] ${r.comps.length} comps acquired`);
-          if (r.warning) warnings.push(`OLX: ${r.warning}`);
-          if (r.degraded) degraded = true;
-          siteProgress.olx.status = "done";
-          siteProgress.olx.count = r.comps.length;
-          return r.comps;
+          try {
+            appendLog(taskId, "INFO", `[OLX] Searching olx.pt for "${euQuery}" (up to ${olxPages} pages)…`);
+            const r = await scrapeOlx(null, euQuery, { maxPages: olxPages });
+            if (r.liveFetchStatus) appendLog(taskId, "INFO", `[OLX] ${r.liveFetchStatus}`);
+            appendLog(taskId, "SUCCESS", `[OLX] ${r.comps.length} comps acquired`);
+            if (r.warning) warnings.push(`OLX: ${r.warning}`);
+            if (r.degraded) degraded = true;
+            siteProgress.olx.status = "done";
+            siteProgress.olx.count = r.comps.length;
+            updateScrapeProgress();
+            return r.comps;
+          } catch (err) {
+            appendLog(taskId, "ERROR", `[OLX] Scraper failed: ${err instanceof Error ? err.message : String(err)}`);
+            siteProgress.olx.status = "error";
+            updateScrapeProgress();
+            return [];
+          }
         })();
     if (skipOlx) {
       appendLog(taskId, "INFO", "[OLX] Skipped by user (skip_olx=true) — proceeding with Vinted-only comparison");
@@ -345,15 +389,23 @@ export async function runPipeline(taskId: string): Promise<void> {
     const vintedPromise: Promise<EuMarketComp[]> = skipVinted
       ? Promise.resolve([])
       : (async () => {
-          appendLog(taskId, "INFO", `[Vinted] Searching vinted.pt for "${state.query}" (up to ${vintedPages} pages)…`);
-          const r = await scrapeVinted(null, state.query, { maxPages: vintedPages });
-          if (r.liveFetchStatus) appendLog(taskId, "INFO", `[Vinted] ${r.liveFetchStatus}`);
-          appendLog(taskId, "SUCCESS", `[Vinted] ${r.comps.length} comps acquired`);
-          if (r.warning) warnings.push(`Vinted: ${r.warning}`);
-          if (r.degraded) degraded = true;
-          siteProgress.vinted.status = "done";
-          siteProgress.vinted.count = r.comps.length;
-          return r.comps;
+          try {
+            appendLog(taskId, "INFO", `[Vinted] Searching vinted.pt for "${euQuery}" (up to ${vintedPages} pages)…`);
+            const r = await scrapeVinted(null, euQuery, { maxPages: vintedPages });
+            if (r.liveFetchStatus) appendLog(taskId, "INFO", `[Vinted] ${r.liveFetchStatus}`);
+            appendLog(taskId, "SUCCESS", `[Vinted] ${r.comps.length} comps acquired`);
+            if (r.warning) warnings.push(`Vinted: ${r.warning}`);
+            if (r.degraded) degraded = true;
+            siteProgress.vinted.status = "done";
+            siteProgress.vinted.count = r.comps.length;
+            updateScrapeProgress();
+            return r.comps;
+          } catch (err) {
+            appendLog(taskId, "ERROR", `[Vinted] Scraper failed: ${err instanceof Error ? err.message : String(err)}`);
+            siteProgress.vinted.status = "error";
+            updateScrapeProgress();
+            return [];
+          }
         })();
     if (skipVinted) {
       appendLog(taskId, "INFO", "[Vinted] Skipped by user (skip_vinted=true) — proceeding with OLX-only comparison");
@@ -366,15 +418,23 @@ export async function runPipeline(taskId: string): Promise<void> {
     const kkPromise: Promise<EuMarketComp[]> = skipKk
       ? Promise.resolve([])
       : (async () => {
-          appendLog(taskId, "INFO", `[KuantoKusta] Searching kuantokusta.pt for "${state.query}" (up to ${kkPages} pages)…`);
-          const r = await scrapeKuantokusta(null, state.query, { maxPages: kkPages });
-          if (r.liveFetchStatus) appendLog(taskId, "INFO", `[KuantoKusta] ${r.liveFetchStatus}`);
-          appendLog(taskId, "SUCCESS", `[KuantoKusta] ${r.comps.length} NEW retail comps acquired`);
-          if (r.warning) warnings.push(`KuantoKusta: ${r.warning}`);
-          if (r.degraded) degraded = true;
-          siteProgress.kk.status = "done";
-          siteProgress.kk.count = r.comps.length;
-          return r.comps;
+          try {
+            appendLog(taskId, "INFO", `[KuantoKusta] Searching kuantokusta.pt for "${euQuery}" (up to ${kkPages} pages)…`);
+            const r = await scrapeKuantokusta(null, euQuery, { maxPages: kkPages });
+            if (r.liveFetchStatus) appendLog(taskId, "INFO", `[KuantoKusta] ${r.liveFetchStatus}`);
+            appendLog(taskId, "SUCCESS", `[KuantoKusta] ${r.comps.length} NEW retail comps acquired`);
+            if (r.warning) warnings.push(`KuantoKusta: ${r.warning}`);
+            if (r.degraded) degraded = true;
+            siteProgress.kk.status = "done";
+            siteProgress.kk.count = r.comps.length;
+            updateScrapeProgress();
+            return r.comps;
+          } catch (err) {
+            appendLog(taskId, "ERROR", `[KuantoKusta] Scraper failed: ${err instanceof Error ? err.message : String(err)}`);
+            siteProgress.kk.status = "error";
+            updateScrapeProgress();
+            return [];
+          }
         })();
     if (skipKk) {
       appendLog(taskId, "INFO", "[KuantoKusta] Skipped by user (skip_kuantokusta=true or skip_new=true)");
@@ -386,21 +446,28 @@ export async function runPipeline(taskId: string): Promise<void> {
     const amazonPromise: Promise<EuMarketComp[]> = skipAmazon
       ? Promise.resolve([])
       : (async () => {
-          appendLog(taskId, "INFO", `[Amazon] Searching amazon.es for "${state.query}" (up to ${amazonPages} pages)…`);
-          const r = await scrapeAmazon(null, state.query, { maxPages: amazonPages });
-          if (r.liveFetchStatus) appendLog(taskId, "INFO", `[Amazon] ${r.liveFetchStatus}`);
-          appendLog(taskId, "SUCCESS", `[Amazon] ${r.comps.length} NEW retail comps acquired`);
-          if (r.warning) warnings.push(`Amazon: ${r.warning}`);
-          if (r.degraded) degraded = true;
-          siteProgress.amazon.status = "done";
-          siteProgress.amazon.count = r.comps.length;
-          return r.comps;
+          try {
+            appendLog(taskId, "INFO", `[Amazon] Searching amazon.es for "${euQuery}" (up to ${amazonPages} pages)…`);
+            const r = await scrapeAmazon(null, euQuery, { maxPages: amazonPages });
+            if (r.liveFetchStatus) appendLog(taskId, "INFO", `[Amazon] ${r.liveFetchStatus}`);
+            appendLog(taskId, "SUCCESS", `[Amazon] ${r.comps.length} NEW retail comps acquired`);
+            if (r.warning) warnings.push(`Amazon: ${r.warning}`);
+            if (r.degraded) degraded = true;
+            siteProgress.amazon.status = "done";
+            siteProgress.amazon.count = r.comps.length;
+            updateScrapeProgress();
+            return r.comps;
+          } catch (err) {
+            appendLog(taskId, "ERROR", `[Amazon] Scraper failed: ${err instanceof Error ? err.message : String(err)}`);
+            siteProgress.amazon.status = "error";
+            updateScrapeProgress();
+            return [];
+          }
         })();
     if (skipAmazon) {
       appendLog(taskId, "INFO", "[Amazon] Skipped by user (skip_amazon=true or skip_new=true)");
     }
     // Wait for all scrapers to finish concurrently
-    patch({ progress: 10, step: stepLabel });
     const [goofishListings, olxComps, vintedComps, kkComps, amazonComps, forex] = await Promise.all([
       goofishPromise,
       olxPromise,
@@ -411,6 +478,25 @@ export async function runPipeline(taskId: string): Promise<void> {
     ]);
     // Stop the per-site progress updates — all scrapers are done
     stopProgress();
+    // ── Category-aware post-scrape filtering ─────────────────────────
+    // Filter out irrelevant EU comps whose titles don't match the
+    // category. E.g., when searching for "iPhone 15", reject "AirPods"
+    // or "Apple Watch" results from OLX/Vinted. This is a broad filter
+    // applied BEFORE the per-listing filterRelevantComps (which does
+    // precise family/tier matching).
+    const filterByCategory = (comps: EuMarketComp[]): EuMarketComp[] => {
+      const before = comps.length;
+      const filtered = comps.filter((c) => isTitleRelevantForCategory(c.title, state.category));
+      const rejected = before - filtered.length;
+      if (rejected > 0) {
+        appendLog(taskId, "INFO", `[Filter] Category filter rejected ${rejected}/${before} irrelevant EU comps (category=${state.category})`);
+      }
+      return filtered;
+    };
+    const olxCompsFiltered = filterByCategory(ensureArray(olxComps));
+    const vintedCompsFiltered = filterByCategory(ensureArray(vintedComps));
+    const kkCompsFiltered = filterByCategory(ensureArray(kkComps));
+    const amazonCompsFiltered = filterByCategory(ensureArray(amazonComps));
     // Defensive guard: scraper should always return an array, but if corrupted
     // data somehow produced a plain object, ensureArray prevents .map() crashes.
     let listings = ensureArray(goofishListings);
@@ -420,7 +506,7 @@ export async function runPipeline(taskId: string): Promise<void> {
     }
     // ── Cancel checkpoint: between scraping and calculating ──
     if (checkCancelled("post-scrape")) return;
-    patch({ progress: 60, step: "All scrapers complete. Calculating profitability…", warnings, degraded });
+    patch({ progress: 58, step: "All scrapers complete. Calculating profitability…", warnings, degraded });
     // If Goofish returned 0, create synthetic listing
     if (listings.length === 0) {
       appendLog(taskId, "WARN", "Goofish returned 0 listings — using synthetic listing for EU price comparison");
@@ -441,7 +527,7 @@ export async function runPipeline(taskId: string): Promise<void> {
     // (e.g. "Pro Max" comps for a "Pro" product) never reach the resale
     // median. Previously the raw comp pool was attached unfiltered —
     // filterRelevantComps was imported but never applied in the pipeline.
-    const allComps = [...olxComps, ...vintedComps, ...kkComps, ...amazonComps];
+    const allComps = [...olxCompsFiltered, ...vintedCompsFiltered, ...kkCompsFiltered, ...amazonCompsFiltered];
     const compsByListing = new Map<string, EuMarketComp[]>();
     for (const l of listings) {
       const relevant = l.normalized
@@ -452,10 +538,10 @@ export async function runPipeline(taskId: string): Promise<void> {
       }
       compsByListing.set(l.id, relevant);
     }
-    appendLog(taskId, "SUCCESS", `Scraping complete — ${listings.length} Goofish listings, ${olxComps.length} OLX, ${vintedComps.length} Vinted, ${kkComps.length} KuantoKusta (new), ${amazonComps.length} Amazon (new)`);
-    patch({ progress: 70, step: "Calculating landed cost & profitability…", warnings, degraded });
+    appendLog(taskId, "SUCCESS", `Scraping complete — ${listings.length} Goofish listings, ${olxCompsFiltered.length} OLX, ${vintedCompsFiltered.length} Vinted, ${kkCompsFiltered.length} KuantoKusta (new), ${amazonCompsFiltered.length} Amazon (new)`);
+    patch({ progress: 65, step: "Matching EU comps per listing…", warnings, degraded });
     // ---------- Phase 3: Calculating ----------
-    patch({ status: "calculating", progress: 75 });
+    patch({ status: "calculating", progress: 72 });
     appendLog(taskId, "INFO", `[Calc] Phase 3 — running scam detection + landed cost + profit analysis on ${listings.length} listings`);
     // Load DB-backed reference prices (admin-editable; seeded from JSON on
     // first access) so scam-detection + profit-calc use current baselines.

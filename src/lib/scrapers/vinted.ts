@@ -15,6 +15,17 @@ export interface VintedScrapeResult {
   authFailed?: boolean;
   liveFetchStatus?: string; // human-readable status of the live fetch attempt
 }
+function extractBrandFromTitle(title: string): string {
+  const t = title.toLowerCase();
+  if (t.includes("samsung") || t.includes("galaxy")) return "Samsung";
+  if (t.includes("xiaomi") || t.includes("redmi") || t.includes("poco")) return "Xiaomi";
+  if (t.includes("dji")) return "DJI";
+  if (t.includes("nintendo") || t.includes("switch")) return "Nintendo";
+  if (t.includes("xbox")) return "Microsoft";
+  if (t.includes("sony") || t.includes("playstation") || t.includes("ps5")) return "Sony";
+  if (t.includes("iphone") || t.includes("ipad") || t.includes("macbook") || t.includes("apple watch") || t.includes("airpods")) return "Apple";
+  return "Unknown";
+}
 function buildVintedSearchUrl(query: string, page: number = 1): string {
   const base = `${config.scraping.vinted_search_url}catalog?search_text=${encodeURIComponent(query)}`;
   return page > 1 ? `${base}&page=${page}` : base;
@@ -83,7 +94,7 @@ async function scrapeVintedLive(euQuery: string, maxPages: number): Promise<{ co
             if (allText.includes("Novo")) condition = "new";
             else if (allText.includes("Como novo")) condition = "excellent";
             else if (allText.includes("Bom estado")) condition = "good";
-            if (title && priceEur > 0) items.push({ title: title.substring(0, 120), priceEur, condition, brand: "Apple" });
+            if (title && priceEur > 0) items.push({ title: title.substring(0, 120), priceEur, condition, brand: extractBrandFromTitle(title) });
           });
         }
         return items;
@@ -143,7 +154,7 @@ function parseVintedHtml(html: string): EuMarketComp[] {
         priceEur,
         condition: "very_good",
         location: "Portugal",
-        brand: "Apple",
+        brand: extractBrandFromTitle(title),
         sellerStars: 4.5,
       });
       idx++;

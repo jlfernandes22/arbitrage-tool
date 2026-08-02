@@ -36,7 +36,7 @@ function stripStorage(q: string): string {
   return q.replace(/\s*\d+\s*(?:GB|TB)\s*$/i, "").trim();
 }
 
-export function ProductTrend({ defaultQuery }: { defaultQuery?: string }) {
+export function ProductTrend({ defaultQuery, refreshKey }: { defaultQuery?: string; refreshKey?: number }) {
   const initialQuery = defaultQuery ? stripStorage(defaultQuery) : "";
   const [query, setQuery] = useState(initialQuery);
   const [activeQuery, setActiveQuery] = useState(initialQuery);
@@ -96,15 +96,17 @@ export function ProductTrend({ defaultQuery }: { defaultQuery?: string }) {
     }
   }, []);
 
-  // Auto-fetch trend when defaultQuery changes
+  // Auto-fetch trend when defaultQuery or refreshKey changes
   useEffect(() => {
     const cleaned = defaultQuery ? stripStorage(defaultQuery) : "";
-    if (cleaned && cleaned !== activeQuery) {
+    if (cleaned) {
       setQuery(cleaned);
       setActiveQuery(cleaned);
       fetchTrend(cleaned);
     }
-  }, [defaultQuery, activeQuery, fetchTrend]);
+  }, [defaultQuery, refreshKey]);
+  // note: intentionally omitting fetchTrend from deps to avoid double-fetch
+  // when both defaultQuery and refreshKey change in the same tick
 
   // Debounce suggestion fetching
   useEffect(() => {
@@ -263,7 +265,7 @@ export function ProductTrend({ defaultQuery }: { defaultQuery?: string }) {
                 <svg
                   viewBox={`0 0 ${Math.max(points.length * 60, 300)} 160`}
                   className="h-full w-full"
-                  preserveAspectRatio="none"
+                  preserveAspectRatio="xMidYMid meet"
                 >
                   {/* Zero line */}
                   <line

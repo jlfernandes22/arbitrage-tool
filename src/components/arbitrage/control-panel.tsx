@@ -219,6 +219,32 @@ export function ControlPanel({
   const brand = BRAND_CATALOG.find((b) => b.id === selectedBrand);
   const productType = brand?.productTypes.find((pt) => pt.id === selectedProductTypeId);
   const allGenerations = productType?.generations ?? [];
+  // ── Auto-detect brand/model from query on re-run ─────────────────
+  // When a user re-runs a search from history, `query` and `category`
+  // are set by the parent but wizard state (selectedBrand etc.) stays
+  // null. This effect detects the matching brand+model from the query
+  // so the wizard UI shows the correct path.
+  useEffect(() => {
+    if (!query.trim() || !category) return;
+    // Find matching preset by query string
+    for (const b of BRAND_CATALOG) {
+      for (const pt of b.productTypes) {
+        if (pt.category !== category) continue;
+        for (const g of pt.generations) {
+          for (const m of g.models) {
+            if (m.query.toLowerCase() === query.trim().toLowerCase()) {
+              setSelectedBrand(b.id);
+              setSelectedProductTypeId(pt.id);
+              setSelectedRange(g.range ?? null);
+              setSelectedGen(g.id);
+              setSelectedPresetLabel(m.label);
+              return;
+            }
+          }
+        }
+      }
+    }
+  }, [query, category]);
   // Filter generations by range if the product type has range filtering
   const availableRanges = productType?.hasRangeFilter
     ? [...new Set(allGenerations.map((g) => g.range).filter(Boolean))] as string[]

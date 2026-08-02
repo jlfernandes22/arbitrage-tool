@@ -3,7 +3,7 @@
 // Takes a normalized product and runs a clean string lookup routine against
 // European target endpoints (OLX.pt, Vinted.pt). Also normalizes condition
 // from Chinese market tokens to European labels.
-import type { Condition, EuMarketComp, NormalizedProduct } from "./types";
+import type { Category, Condition, EuMarketComp, NormalizedProduct } from "./types";
 import { conditionLabel } from "./normalizer";
 // Condition normalization dictionary (CN -> EU)
 export const CONDITION_NORMALIZATION: Record<string, Condition> = {
@@ -26,6 +26,71 @@ export const CONDITION_NORMALIZATION: Record<string, Condition> = {
 };
 export function normalizeConditionFromToken(token: string): Condition {
   return CONDITION_NORMALIZATION[token] ?? "unknown";
+}
+// ── Category-aware EU query refinement ──────────────────────────────
+// Maps a Category + raw query to a refined query better suited for EU
+// marketplaces. Since EU scrapers run concurrently with Goofish, we
+// don't have a full NormalizedProduct yet — but we DO know the category
+// and can extract brand/product info from the user's query.
+//
+// KEYWORDS_PER_CATEGORY define required terms that MUST appear in an EU
+// comp title for it to be relevant. Used by `isTitleRelevantForCategory`.
+export const CATEGORY_REQUIRED_KEYWORDS: Record<Category, string[]> = {
+  iphone: ["iphone"],
+  macbook: ["macbook"],
+  ipad: ["ipad"],
+  ps5: ["playstation", "ps5"],
+  samsung: ["samsung", "galaxy"],
+  applewatch: ["apple watch", "iwatch", "watch"],
+  dji: ["dji"],
+  xiaomi: ["xiaomi", "redmi", "poco"],
+  gaming: ["nintendo", "switch", "xbox", "steam", "deck", "rog"],
+};
+// Extra terms commonly found in irrelevant results for each category.
+// These trigger rejection even if required keywords match.
+export const CATEGORY_EXCLUDED_KEYWORDS: Record<Category, string[]> = {
+  iphone: ["airpods", "airpod", "smartwatch", "watch", "apple watch", "magSafe", "mag safe"],
+  macbook: ["mac mini", "mac studio", "imac", "mac pro", "airpods", "iphone"],
+  ipad: ["iphone", "airpods", "macbook", "pencil", "apple pencil"],
+  ps5: ["ps4", "ps3", "xbox", "nintendo", "switch", "controller", "dualsense", "headset", "cable"],
+  samsung: ["iphone", "airpods", "xiaomi", "huawei"],
+  applewatch: ["iphone", "ipad", "macbook", "airpods", "samsung"],
+  dji: [],
+  xiaomi: ["iphone", "samsung galaxy", "huawei", "airpods"],
+  gaming: [],
+};
+/**
+ * Build a clean EU search query from a category + raw user query.
+ * Extracts meaningful product identifiers and drops noise.
+ */
+export function buildCategoryEuQuery(category: Category, rawQuery: string): string {
+  const q = rawQuery.trim();
+  if (category === "ps5") {
+    // Ensure "PS5" or "PlayStation 5" is in the query
+    if (/ps5|playstation\s*5/i.test(q)) return q;
+    return `PlayStation 5 ${q}`.trim();
+  }
+  if (category === "gaming") {
+    return q; // gaming is broad — pass through as-is
+  }
+  return q;
+}
+/**
+ * Check if an EU comp title is relevant for the given category.
+ * Uses required keywords (must match at least one) and excluded keywords
+ * (reject if any match).
+ */
+export function isTitleRelevantForCategory(title: string, category: Category): boolean {
+  const t = title.toLowerCase();
+  const required = CATEGORY_REQUIRED_KEYWORDS[category];
+  const excluded = CATEGORY_EXCLUDED_KEYWORDS[category];
+  // Must contain at least one required keyword
+  const hasRequired = required.some((kw) => t.includes(kw));
+  if (!hasRequired) return false;
+  // Must NOT contain any excluded keyword
+  const hasExcluded = excluded.some((kw) => t.includes(kw));
+  if (hasExcluded) return false;
+  return true;
 }
 /**
  * Build a clean European search query from a normalized product.

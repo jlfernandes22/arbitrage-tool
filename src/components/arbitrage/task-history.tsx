@@ -62,6 +62,9 @@ interface TaskHistoryProps {
   // Delete a task from history. Optional — when provided, a delete button
   // appears on each history entry (hover to reveal).
   onDeleteTask?: (taskId: string) => void;
+  // Clear all history. Optional — when provided, a "Clear All" button
+  // appears in the header.
+  onClearAll?: () => void;
 }
 
 export function TaskHistory({
@@ -77,6 +80,7 @@ export function TaskHistory({
   isSavedActive,
   onToggleSaveActive,
   onDeleteTask,
+  onClearAll,
 }: TaskHistoryProps) {
   const [tasks, setTasks] = useState<HistoryTask[]>([]);
   const [loading, setLoading] = useState(true);
@@ -142,9 +146,24 @@ export function TaskHistory({
         <CardTitle className="flex items-center gap-2 text-sm">
           <History className="h-4 w-4" />
           Scan History
-          <Badge variant="secondary" className="ml-auto text-xs">
+          <Badge variant="secondary" className="text-xs">
             {tasks.length}
           </Badge>
+          {onClearAll && tasks.length > 0 && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="ml-auto h-6 gap-1 px-2 text-[10px] text-muted-foreground hover:text-rose-600"
+              onClick={() => {
+                if (window.confirm(`Delete all ${tasks.length} scans from history? This cannot be undone.`)) {
+                  onClearAll();
+                }
+              }}
+            >
+              <Trash2 className="h-3 w-3" />
+              Clear All
+            </Button>
+          )}
         </CardTitle>
       </CardHeader>
       <CardContent className="flex-1 p-0">
