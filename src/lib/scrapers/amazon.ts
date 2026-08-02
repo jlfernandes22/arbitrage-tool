@@ -103,9 +103,16 @@ function parseAmazonHtml(html: string): Array<{ title: string; priceEur: number;
 
 /**
  * Try a plain HTTP fetch — different TLS fingerprint than Playwright.
+ *
+ * `page` is forwarded to `buildAmazonSearchUrl` so multi-page fetching
+ * actually advances past page 1. Previously this function ignored the page
+ * parameter, so the multi-page loop in `scrapeAmazonLive` would fetch the
+ * same page 1 every iteration and then `break` (because dedup reported
+ * `newCount === 0` on iteration 2). Multi-page fetching was silently broken
+ * for the HTTP strategy.
  */
-async function fetchAmazonHtml(euQuery: string): Promise<{ html: string | null; status: number }> {
-  const url = buildAmazonSearchUrl(euQuery);
+async function fetchAmazonHtml(euQuery: string, page: number = 1): Promise<{ html: string | null; status: number }> {
+  const url = buildAmazonSearchUrl(euQuery, page);
   try {
     const res = await fetch(url, {
       signal: AbortSignal.timeout(15000),
@@ -149,7 +156,7 @@ async function scrapeAmazonLive(
 
   // Strategy 1: Plain HTTP fetch (works from most IPs — Amazon returns full HTML)
   for (let pageNum = 1; pageNum <= maxPages; pageNum++) {
-    const { html, status } = await fetchAmazonHtml(euQuery);
+    const { html } = await fetchAmazonHtml(euQuery, pageNum);
     if (html) {
       const items = parseAmazonHtml(html);
       let newCount = 0;

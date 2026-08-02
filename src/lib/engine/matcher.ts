@@ -29,7 +29,12 @@ export function normalizeConditionFromToken(token: string): Condition {
 }
 /**
  * Build a clean European search query from a normalized product.
- * Produces the string used to query OLX / Vinted.
+ * Produces the string used to query OLX / Vinted / KuantoKusta / Amazon.
+ *
+ * IMPORTANT: When `storageGB` is undefined, do NOT append a stray "GB" —
+ * the previous implementation produced strings like "iPhone 15 GB" which
+ * then became the literal search query on every EU marketplace, returning
+ * fewer or irrelevant results.
  */
 export function buildEuQuery(product: NormalizedProduct): string {
   if (product.category === "ps5") {
@@ -41,11 +46,10 @@ export function buildEuQuery(product: NormalizedProduct): string {
     if (product.storageGB) parts.push(`${product.storageGB}GB`);
     return parts.join(" ");
   }
-  if (product.category === "ipad") {
-    return `${product.family} ${product.storageGB ?? ""}GB`.trim();
-  }
-  // iphone
-  return `${product.family} ${product.storageGB ?? ""}GB`.trim();
+  // ipad, iphone, samsung, xiaomi, gaming, etc. — only append storage if known
+  const parts = [product.family];
+  if (product.storageGB) parts.push(`${product.storageGB}GB`);
+  return parts.join(" ").trim();
 }
 /**
  * Detect the model tier of a family/title string using word-boundary

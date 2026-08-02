@@ -53,6 +53,75 @@ const YELLOW_MODIFIERS = [
 function clampScore(n: number): number {
   return Math.max(0, Math.min(100, Math.round(n)));
 }
+
+// ── Chinese Negation-Aware Matching ──────────────────────────────────
+// Chinese sellers frequently write "无进水" (no water damage), "无拆修"
+// (no disassembly), etc. These phrases CONTAIN the blacklist token as a
+// substring, so a naive text.includes("进水") would false-positive on
+// "无进水". The negation-aware matcher checks the characters immediately
+// before the token for a negation prefix.
+//
+// Negation prefixes that negate the following token:
+//   无 (wú)     — no / without / none
+//   没有 (méi)  — not have
+//   不 (bù)     — not
+//   非 (fēi)    — non- / not
+//   未 (wèi)    — not yet
+//   没 (méi)    — not have (short form)
+//
+// NOTE: Tokens like "无盒" (no box) in YELLOW_MODIFIERS are NOT affected —
+// the "无" is part of the token itself, and the matcher only checks what
+// comes BEFORE the full token. So "无盒" still correctly matches as a
+// yellow modifier (seller states there's no original box).
+const NEGATION_PREFIXES = ["没有", "无", "不", "非", "未", "没"];
+
+/**
+ * Check if a token appears in the text WITHOUT being negated by a preceding
+ * negation prefix. Returns true only if at least one occurrence is NOT negated.
+ *
+ * Example: includesNonNegated("整机无进水", "进水") → false
+ *          includesNonNegated("进水修好", "进水")   → true
+ *          includesNonNegated("无进水，但曾进水", "进水") → true (2nd occurrence)
+ */
+export function includesNonNegated(text: string, token: string): boolean {
+  let searchStart = 0;
+  while (true) {
+    const idx = text.indexOf(token, searchStart);
+    if (idx === -1) return false; // token not found at all
+    // Check up to 2 characters before the token for a negation prefix
+    const before = text.slice(Math.max(0, idx - 2), idx);
+    const isNegated = NEGATION_PREFIXES.some((neg) => before.endsWith(neg));
+    if (!isNegated) return true; // found a non-negated occurrence
+    // This occurrence is negated — keep searching for another
+    searchStart = idx + token.length;
+  }
+}
+
+/**
+ * Find all negated occurrences of a token (preceded by a negation prefix).
+ * Used to track positive declarations like "无进水" (no water damage) which
+ * are positive trust signals — the seller explicitly denies the problem.
+ *
+ * Returns the full negated phrases (prefix + token), deduplicated.
+ */
+function findNegatedOccurrences(text: string, token: string): string[] {
+  const result: string[] = [];
+  let searchStart = 0;
+  while (true) {
+    const idx = text.indexOf(token, searchStart);
+    if (idx === -1) break;
+    const before = text.slice(Math.max(0, idx - 2), idx);
+    const negPrefix = NEGATION_PREFIXES.find((neg) => before.endsWith(neg));
+    if (negPrefix) {
+      const fullPhrase = negPrefix + token;
+      if (!result.includes(fullPhrase)) {
+        result.push(fullPhrase);
+      }
+    }
+    searchStart = idx + token.length;
+  }
+  return result;
+}
 /**
  * Compute a seller trust score (0-60) from three signals:
  *   1. Positive feedback rate (好评率) — 0-40 points
@@ -137,11 +206,21 @@ export function detectScam(
   let dropped = false;
   const text = `${listing.title} ${listing.description}`;
   // LAYER 1 — Critical Blacklist (Auto Drop) — always non-negotiable
+  // Uses negation-aware matching: "无进水" (no water damage) does NOT trigger
+  // the "进水" (water damaged) blacklist token. Only non-negated occurrences
+  // count as a real blacklist hit.
+  const positiveDeclarations: string[] = [];
   for (const item of CRITICAL_BLACKLIST) {
-    if (text.includes(item.token)) {
+    if (includesNonNegated(text, item.token)) {
       matchedBlacklist.push(`${item.token} (${item.label})`);
       dropped = true;
       risk = 100;
+    } else {
+      // Token not found non-negated — check if it appears negated (positive signal)
+      const negated = findNegatedOccurrences(text, item.token);
+      for (const phrase of negated) {
+        positiveDeclarations.push(`${phrase} (no ${item.label})`);
+      }
     }
   }
   if (dropped) {
@@ -155,6 +234,15 @@ export function detectScam(
       matchedBlacklistTokens: matchedBlacklist,
       matchedYellowTokens: [],
     };
+  }
+  // Track positive declarations (seller explicitly denies issues)
+  // e.g. "无进水" (no water damage), "无拆修" (never opened) — these are
+  // trust signals. We log them as reasons but don't reduce risk (the seller
+  // trust score is the dominant factor; declarations are informational).
+  if (positiveDeclarations.length > 0) {
+    reasons.push(
+      `Positive declarations: ${positiveDeclarations.join(", ")} (+0)`,
+    );
   }
   // LAYER 1.5 — Lock Status (from normalized product)
   // A carrier/iCloud/MDM-locked phone is worthless for Portugal resale.
@@ -195,9 +283,17 @@ export function detectScam(
   risk += sellerTrust.risk;
   reasons.push(...sellerTrust.reasons);
   // LAYER 3 — Yellow Modifiers (reduced to +10 each, cap 20 — minor signal)
+  // Uses negation-aware matching: "无拆修" (no disassembly) does NOT trigger
+  // the "拆修" yellow modifier — the seller is explicitly stating no repairs.
   for (const item of YELLOW_MODIFIERS) {
-    if (text.includes(item.token)) {
+    if (includesNonNegated(text, item.token)) {
       matchedYellow.push(`${item.token} (${item.label})`);
+    } else {
+      // Token not found non-negated — check if it appears negated (positive signal)
+      const negated = findNegatedOccurrences(text, item.token);
+      for (const phrase of negated) {
+        positiveDeclarations.push(`${phrase} (no ${item.label})`);
+      }
     }
   }
   if (matchedYellow.length > 0) {

@@ -23,6 +23,16 @@ export interface NormalizedProduct {
   connectivity?: "wifi" | "cellular";
   formFactor?: string;
   driveConfig?: string;
+  // Region version: which market the device was sold for.
+  // CRITICAL for arbitrage — a China-market iPhone may have different band
+  // support / dual-SIM config than an EU model, and certain region-locked
+  // units cannot be activated outside China.
+  regionVersion?: "china" | "international" | "us" | "japan" | "korea" | "unknown";
+  // Lock status: whether the device is free to use on any carrier / has no
+  // activation locks. A locked Chinese-market iPhone cannot be used in
+  // Portugal and is effectively worthless there — this field MUST be present
+  // on the frontend type so the listing-detail dialog compiles cleanly.
+  lockStatus?: "unlocked" | "carrier_locked" | "icloud_locked" | "mdm_locked" | "unknown";
   condition: Condition;
   conditionRaw?: string;
 }
@@ -2316,19 +2326,6 @@ const MODEL_RELEASE_DATES: Record<string, string> = {
   "Xiaomi 14": "2023",
   "Xiaomi 14 Pro": "2023",
   "Xiaomi 14 Ultra": "2024",
-  "Xiaomi 15": "2024",
-  "Xiaomi 15 Pro": "2024",
-  "Xiaomi 15 Ultra": "2024",
-  "Xiaomi 15T": "2024",
-  "Xiaomi 15T Pro": "2024",
-  "Xiaomi Buds 5": "2024",
-  "Xiaomi Buds 5 Pro": "2024",
-  "Xiaomi Mi Band 8": "2023",
-  "Xiaomi Mi Band 9": "2024",
-  "Xiaomi Pad 7": "2024",
-  "Xiaomi Pad 7 Pro": "2024",
-  "Xiaomi Pad 8": "2025",
-  "Xiaomi Pad 8 Pro": "2025",
   "JBL Flip 7": "2025",
   "JBL Charge 6": "2025",
   "JBL Extreme 5": "2025",

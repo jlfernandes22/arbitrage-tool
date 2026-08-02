@@ -89,13 +89,14 @@ export function TaskHistory({
         if (!res.ok) return;
         const data = await res.json();
         if (cancelled) return;
-        setTasks(data.tasks ?? []);
+        setTasks(Array.isArray(data.tasks) ? data.tasks : []);
         setLoading(false);
-        // Stop polling when no tasks are active (done/error/paused only) —
-        // saves bandwidth when the dashboard is idle.
+        // Stop polling when no tasks are active. Must include "cancelled" in
+        // the terminal set — otherwise a cancelled task keeps `hasActive=true`
+        // forever and the sidebar polls /api/tasks/list every 2s indefinitely.
+        const TERMINAL = new Set(["done", "error", "paused", "cancelled"]);
         const hasActive = (data.tasks ?? []).some(
-          (t: HistoryTask) =>
-            t.status !== "done" && t.status !== "error" && t.status !== "paused",
+          (t: HistoryTask) => !TERMINAL.has(t.status),
         );
         if (hasActive && !interval) {
           interval = setInterval(load, 2000); // poll every 2s when active

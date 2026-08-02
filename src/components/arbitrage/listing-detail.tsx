@@ -42,6 +42,17 @@ import {
 } from "./types";
 import { displayTitle as cleanDisplayTitle, translateConditionRaw } from "@/lib/engine/normalizer";
 
+// Normalize image URLs — ensures protocol-relative URLs (//img.alicdn.com/...)
+// get the https: prefix so they load correctly in all browsers.
+// Also handles relative URLs by prefixing with goofish.com.
+function normalizeImageUrl(url: string): string {
+  if (!url) return "";
+  if (url.startsWith("//")) return `https:${url}`;
+  if (url.startsWith("http")) return url;
+  if (url.startsWith("/")) return `https://www.goofish.com${url}`;
+  return url;
+}
+
 interface ListingDetailDialogProps {
   listing: EvaluatedListing | null;
   open: boolean;
@@ -70,6 +81,8 @@ export function ListingDetailDialog({
   // Track which listing id the current translation belongs to so we don't
   // show a stale translation when the user opens a different listing.
   const translatedIdRef = useRef<string | null>(null);
+  // Currently selected image in the gallery (resets when listing changes)
+  const [selectedImage, setSelectedImage] = useState(0);
 
   const l = listing?.listing;
   const scam = listing?.scam;
@@ -138,6 +151,11 @@ export function ListingDetailDialog({
       void doTranslate(false);
     }
   }, [open, l, doTranslate]);
+
+  // Reset image gallery selection when the listing changes
+  useEffect(() => {
+    setSelectedImage(0);
+  }, [l?.id]);
 
   if (!listing || !l || !scam || !profit || !landed) return null;
 
@@ -294,6 +312,52 @@ export function ListingDetailDialog({
                 </div>
               </div>
             </section>
+            {/* Image Gallery — displays all listing images from Goofish */}
+            {l.imageUrls.length > 0 && (
+              <section className="min-w-0 rounded-lg border bg-muted/30 p-3">
+                <h4 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  <Images className="h-3.5 w-3.5" />
+                  Listing Images ({l.imageUrls.length}
+                  {l.imageCount && l.imageCount > l.imageUrls.length
+                    ? ` of ${l.imageCount}`
+                    : ""})
+                </h4>
+                <div className="space-y-2">
+                  {/* Main image view */}
+                  <div className="relative aspect-square w-full overflow-hidden rounded-md bg-muted/40 sm:aspect-[4/3]">
+                    <img
+                      src={normalizeImageUrl(l.imageUrls[selectedImage])}
+                      alt={`${l.title} — image ${selectedImage + 1}`}
+                      className="h-full w-full object-contain"
+                      referrerPolicy="no-referrer"
+                    />
+                  </div>
+                  {/* Thumbnail strip — only show if more than 1 image */}
+                  {l.imageUrls.length > 1 && (
+                    <div className="flex gap-2 overflow-x-auto pb-1">
+                      {l.imageUrls.map((url, idx) => (
+                        <button
+                          key={idx}
+                          onClick={() => setSelectedImage(idx)}
+                          className={`relative h-16 w-16 shrink-0 overflow-hidden rounded-md border-2 transition ${
+                            idx === selectedImage
+                              ? "border-primary ring-1 ring-primary"
+                              : "border-transparent opacity-60 hover:opacity-100"
+                          }`}
+                        >
+                          <img
+                            src={normalizeImageUrl(url)}
+                            alt={`Thumbnail ${idx + 1}`}
+                            className="h-full w-full object-cover"
+                            referrerPolicy="no-referrer"
+                          />
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </section>
+            )}
             {/* Translation panel — shown when translating, translated, or errored */}
             {(translating || hasTranslation || translateError) && (
               <section className="min-w-0 rounded-lg border border-sky-200 bg-sky-50/50 p-3 dark:border-sky-900 dark:bg-sky-950/20">
@@ -472,10 +536,10 @@ export function ListingDetailDialog({
                 <div className="flex flex-wrap gap-1.5">
                   {/* Enriched condition flags from the listing detail page */}
                   {l.conditionFlags?.map((flag) => {
-                    const isPositive = flag === "All Original" || flag === "Original" || flag === "Never Opened";
+                    const isPositive = flag === "All Original" || flag === "Original" || flag === "Never Opened" || flag === "No Water Damage";
                     const isNegative = flag === "Battery Replaced" || flag === "Screen Replaced" ||
                       flag === "No Box" || flag === "Water Damage" || flag === "Screen Leak" ||
-                      flag === "Cracked Screen" || flag === "Locked" || flag === "Repaired";
+                      flag === "Cracked Screen" || flag === "Locked" || flag === "Repaired" || flag === "Opened/Repaired";
                     return (
                       <Badge
                         key={flag}
@@ -526,7 +590,11 @@ export function ListingDetailDialog({
                   value={String(l.sellerVerifiedTransactions)}
                 />
                 <Telemetry icon={Heart} label="Wants" value={String(l.wantsCount)} />
-                <Telemetry icon={Images} label="Images" value={String(l.imageUrls.length)} />
+                <Telemetry
+                  icon={Images}
+                  label="Images"
+                  value={String(l.imageCount ?? l.imageUrls.length)}
+                />
               </div>
             </section>
             <Separator />

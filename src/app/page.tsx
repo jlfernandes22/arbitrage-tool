@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Radar,
   AlertTriangle,
@@ -72,6 +72,7 @@ import {
   type LogEntry,
   type TaskResult,
   type TaskStatusResponse,
+  type EvaluatedListing,
 } from "@/components/arbitrage/types";
 import { ControlPanel } from "@/components/arbitrage/control-panel";
 import { SummaryCards } from "@/components/arbitrage/summary-cards";
@@ -119,6 +120,11 @@ export default function Home() {
   // Holds the latest config overrides from the ControlPanel so re-run can
   // use the user's current values instead of server defaults.
   const currentOverridesRef = useRef<AppConfigOverrides>({});
+  // Safe access to listings: always an array
+  const safeListings = useMemo(() => {
+    if (!result) return [];
+    return Array.isArray(result.listings) ? result.listings : [];
+  }, [result]);
   const stopPolling = useCallback(() => {
     if (pollRef.current) {
       clearTimeout(pollRef.current);
@@ -135,7 +141,25 @@ export default function Home() {
           const res = await fetch(`/api/tasks/status/${id}`, {
             cache: "no-store",
           });
-          if (!res.ok) return;
+          // ── Handle non-OK responses explicitly ──
+          // Previously `if (!res.ok) return;` silently bailed, leaving
+          // `scanning=true` forever and the spinner spinning (especially
+          // after a server restart when the task was DB-only).
+          if (!res.ok) {
+            if (res.status === 404) {
+              // Task truly doesn't exist (not in memory, not in DB).
+              // Stop polling + clear scanning + surface the error.
+              stopPolling();
+              setScanning(false);
+              setError("Task not found. It may have been from a previous session.");
+              toast.error("Task not found");
+              return;
+            }
+            // 5xx / 429 — transient server error, retry with backoff.
+            interval = Math.min(interval + 500, 3000);
+            pollRef.current = setTimeout(tick, interval) as unknown as ReturnType<typeof setInterval>;
+            return;
+          }
           const data: TaskStatusResponse = await res.json();
           if (!mountedRef.current) return;
           setStatus(data);
@@ -427,9 +451,9 @@ export default function Home() {
   // ── Filtered listings for export ────────────────────────────────────
   // When a card filter or heatmap cell filter is active, CSV/JSON export
   // should respect it so the exported file matches what the user sees.
-  const getFilteredListings = useCallback((): typeof result.listings | null => {
+  const getFilteredListings = useCallback((): EvaluatedListing[] | null => {
     if (!result) return null;
-    let base = result.listings;
+    let base: EvaluatedListing[] = safeListings;
     if (cardFilter === "viable") base = base.filter((l) => !l.hidden);
     else if (cardFilter === "scam") base = base.filter((l) => l.hidden && (l.scam.dropped || l.scam.riskScore >= 60));
     else if (cardFilter === "profit") base = base.filter((l) => l.hidden && !(l.scam.dropped || l.scam.riskScore >= 60));
@@ -463,12 +487,13 @@ export default function Home() {
     },
     onTogglePin: () => {
       if (!query.trim()) return;
+      // Capture the state BEFORE toggling. `toggleSaved` updates state
+      // asynchronously (via setQueries), so reading `isSaved` after the
+      // call returns the STALE pre-toggle value, which inverts the toast
+      // message (pinning says "unpinned" and vice versa).
+      const wasSaved = savedQueries.isSaved(query, category);
       savedQueries.toggleSaved(query, category);
-      toast.success(
-        savedQueries.isSaved(query, category)
-          ? "Query unpinned"
-          : "Query pinned to sidebar",
-      );
+      toast.success(wasSaved ? "Query unpinned" : "Query pinned to sidebar");
     },
     onReevaluate: () => {
       if (taskId && result && !reevaluating) handleReevaluate();
@@ -480,8 +505,12 @@ export default function Home() {
     onCopyMarkdown: () => resultsTableRef.current?.copyActiveMarkdown(),
     onExportCsv: () => {
       const filtered = getFilteredListings();
-      if (filtered) {
-        exportListingsCsv(filtered, result.query);
+      // Capture `result` locally so TS can prove it's non-null inside the
+      // block (getFilteredListings already checked, but TS can't verify
+      // the correlation across the function boundary).
+      const r = result;
+      if (filtered && r) {
+        exportListingsCsv(filtered, r.query);
         toast.success(`CSV exported${cardFilter ? ` (${filtered.length} filtered)` : ""}`);
       }
     },
@@ -534,12 +563,9 @@ export default function Home() {
                     activeCategory={category}
                     isSavedActive={savedQueries.isSaved(query, category)}
                     onToggleSaveActive={() => {
+                      const wasSaved = savedQueries.isSaved(query, category);
                       savedQueries.toggleSaved(query, category);
-                      toast.success(
-                        savedQueries.isSaved(query, category)
-                          ? "Query unpinned"
-                          : "Query pinned to sidebar",
-                      );
+                      toast.success(wasSaved ? "Query unpinned" : "Query pinned to sidebar");
                     }}
                     onDeleteTask={handleDeleteTask}
                   />
@@ -614,19 +640,16 @@ export default function Home() {
                 activeCategory={category}
                 isSavedActive={savedQueries.isSaved(query, category)}
                 onToggleSaveActive={() => {
+                  const wasSaved = savedQueries.isSaved(query, category);
                   savedQueries.toggleSaved(query, category);
-                  toast.success(
-                    savedQueries.isSaved(query, category)
-                      ? "Query unpinned"
-                      : "Query pinned to sidebar",
-                  );
+                  toast.success(wasSaved ? "Query unpinned" : "Query pinned to sidebar");
                 }}
                 onDeleteTask={handleDeleteTask}
               />
             </div>
             {/* ── EU Market Comp Links (below scan history in sidebar) ── */}
-            {result && result.listings.length > 0 && (() => {
-              const allComps = result.listings.flatMap((l) => l.euComps ?? []);
+            {safeListings.length > 0 && (() => {
+              const allComps = safeListings.flatMap((l) => l.euComps ?? []);
               const seen = new Set<string>();
               const deduped = allComps.filter((c) => {
                 const key = `${c.platform}:${c.title}:${c.priceEur}`;
@@ -838,10 +861,16 @@ export default function Home() {
             {scanning && status?.step && (
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-5 pt-1">
                 {(() => {
+                  // Guard: although we're inside `scanning && status?.step && (...)`,
+                  // TS does not preserve narrowing into the IIFE function body
+                  // (closure-captured variables are treated as potentially mutated).
+                  // This guard makes the non-nullability explicit so the rest of
+                  // the IIFE type-checks cleanly.
+                  if (!status?.step) return null;
                   const stepText = status.step;
                   const parts = stepText.includes("|") ? stepText.split("|").map((s) => s.trim()) : [];
                   const getPart = (name: string) => parts.find((p) => p.toLowerCase().includes(name.toLowerCase()));
-                  const platforms = [
+                  const platforms: Array<{ name: string; flag: string; tag: string }> = [
                     { name: "Goofish", flag: "🇨🇳", tag: "China (CNY)" },
                     { name: "OLX", flag: "🇵🇹", tag: "OLX.pt" },
                     { name: "Vinted", flag: "🇵🇹", tag: "Vinted.pt" },
@@ -895,7 +924,7 @@ export default function Home() {
                         </div>
                       </div>
                     );
-                  })();
+                  });
                 })()}
               </div>
             )}
@@ -994,21 +1023,21 @@ export default function Home() {
         {result && (
           <>
             {/* Warnings */}
-            {result.warnings.length > 0 && (
-              <Alert className="border-amber-300 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/40">
-                <AlertTriangle className="h-4 w-4 text-amber-600" />
-                <AlertTitle className="text-sm">
-                  {result.warnings.length} {result.warnings.length === 1 ? "Pipeline Warning" : "Pipeline Warnings"}
-                </AlertTitle>
-                <AlertDescription>
-                  <ul className="mt-1 space-y-0.5 text-xs text-amber-700 dark:text-amber-300">
-                    {result.warnings.map((w, i) => (
-                      <li key={i}>• {w}</li>
-                    ))}
-                  </ul>
-                </AlertDescription>
-              </Alert>
-            )}
+{Array.isArray(result.warnings) && result.warnings.length > 0 && (
+  <Alert className="border-amber-300 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/40">
+    <AlertTriangle className="h-4 w-4 text-amber-600" />
+    <AlertTitle className="text-sm">
+      {result.warnings.length} {result.warnings.length === 1 ? "Pipeline Warning" : "Pipeline Warnings"}
+    </AlertTitle>
+    <AlertDescription>
+      <ul className="mt-1 space-y-0.5 text-xs text-amber-700 dark:text-amber-300">
+        {result.warnings.map((w, i) => (
+          <li key={i}>• {w}</li>
+        ))}
+      </ul>
+    </AlertDescription>
+  </Alert>
+)}
             {/* ── EU Market Price Preview ──────────────────────────────
                 Shows resale prices on Portuguese marketplaces BEFORE the
                 Goofish listings, organized into:
@@ -1022,7 +1051,7 @@ export default function Home() {
               // Aggregate all EU comps from all evaluated listings.
               // Dedupe by title+price so the same comp attached to multiple
               // Goofish listings isn't double-counted in the market preview.
-              const allComps = result.listings.flatMap((l) => l.euComps ?? []);
+              const allComps = safeListings.flatMap((l) => l.euComps ?? []);
               const seen = new Set<string>();
               const deduped = allComps.filter((c) => {
                 const key = `${c.platform}:${c.title}:${c.priceEur}`;
@@ -1038,7 +1067,7 @@ export default function Home() {
               const usedComps = [...olxComps, ...vintedComps];
               // Goofish source prices (CNY → EUR conversion) — computed early
               // so we can decide whether to show the section at all.
-              const goofishPrices = result.listings
+              const goofishPrices = safeListings
                 .map((l) => ({
                   priceCny: l.listing.priceCny,
                   priceEur: l.profit?.landed?.acquisitionCostEur ?? 0,
@@ -1288,13 +1317,13 @@ export default function Home() {
             )}
             {/* Profit distribution chart (current scan) + trend across scans */}
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-              <ProfitChart listings={result.listings} />
+              <ProfitChart listings={safeListings} />
               <ProfitTrendChart refreshKey={historyRefreshKey} />
             </div>
             {/* Profitability heatmap — model × condition colored by median net profit.
                 Click a cell to filter the results table to that model+condition. */}
             <ProfitHeatmap
-              listings={result.listings}
+              listings={safeListings}
               activeCell={heatmapCell}
               onCellClick={setHeatmapCell}
             />
@@ -1404,7 +1433,7 @@ export default function Home() {
               </div>
               <ResultsTable
                 ref={resultsTableRef}
-                listings={result.listings}
+                listings={safeListings}
                 showHidden={showHidden}
                 onToggleHidden={() => setShowHidden((s) => !s)}
                 cardFilter={cardFilter}

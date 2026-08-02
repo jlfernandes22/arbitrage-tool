@@ -191,11 +191,25 @@ export async function runPipeline(taskId: string): Promise<void> {
   if (!state) return;
   const cfg = resolveConfig(state.configOverrides);
   const patch = (p: Partial<TaskState>) => updateTask(taskId, p);
+  // Per-site progress interval handle. Declared OUTSIDE the try block so the
+  // catch block (and the cancel-checkpoint early returns) can clear it. Without
+  // this hoist, the catch block references an out-of-scope `const` and throws a
+  // ReferenceError, which masks the original error AND leaks the interval.
+  let progressInterval: ReturnType<typeof setInterval> | null = null;
+  const stopProgress = () => {
+    if (progressInterval) {
+      clearInterval(progressInterval);
+      progressInterval = null;
+    }
+  };
   // Helper: if the user requested a cancel, finalize the task as "cancelled"
   // and return true so the caller can bail out of the pipeline gracefully.
   const checkCancelled = (at: string): boolean => {
     if (!isCancelRequested(taskId)) return false;
     appendLog(taskId, "WARN", `Cancel requested — aborting pipeline at ${at}`);
+    // Stop the per-site progress ticker so it doesn't keep mutating the
+    // cancelled task's `step` field (which would overwrite "Cancelled by user").
+    stopProgress();
     const cur = getTask(taskId);
     const cancelledState: TaskState = {
       ...(cur ?? state),
@@ -270,7 +284,7 @@ export async function runPipeline(taskId: string): Promise<void> {
       kk: { status: skipKk ? "skipped" : "running", count: 0, label: "KuantoKusta" },
       amazon: { status: skipAmazon ? "skipped" : "running", count: 0, label: "Amazon" },
     };
-    const progressInterval = setInterval(() => {
+    progressInterval = setInterval(() => {
       const parts = Object.values(siteProgress).map(s => {
         if (s.status === "skipped") return `${s.label}: ⏭️ skipped`;
         if (s.status === "done") return `${s.label}: ✅ ${s.count} listings`;
@@ -395,7 +409,7 @@ export async function runPipeline(taskId: string): Promise<void> {
       forexPromise,
     ]);
     // Stop the per-site progress updates — all scrapers are done
-    clearInterval(progressInterval);
+    stopProgress();
     let listings = goofishListings;
     appendLog(taskId, "INFO", `[Forex] CNY→EUR rate=${forex.rate} (source: ${forex.source})`);
     if (forex.source === "fallback") {
@@ -516,7 +530,7 @@ export async function runPipeline(taskId: string): Promise<void> {
     appendLog(taskId, "SUCCESS", `Pipeline complete — ${summary.shown}/${summary.total} viable, best profit €${Math.round(summary.bestProfitEur)}, avg margin ${summary.avgMarginPct}%`);
     await persistTask(taskId, finalState);
   } catch (err) {
-    clearInterval(progressInterval);
+    stopProgress();
     const message = err instanceof Error ? err.message : String(err);
     appendLog(taskId, "ERROR", `Pipeline error: ${message}`);
     const cur = getTask(taskId);

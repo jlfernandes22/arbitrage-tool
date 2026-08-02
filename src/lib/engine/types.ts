@@ -1,4 +1,5 @@
 // Core domain types shared across engines, scrapers, and API layer.
+import type { AppConfig } from "@/lib/config";
 export type Category = "iphone" | "macbook" | "ipad" | "ps5" | "samsung" | "applewatch" | "dji" | "xiaomi" | "gaming";
 export type Condition =
   | "new"

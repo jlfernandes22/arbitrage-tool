@@ -1,13 +1,52 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getTask } from "@/lib/task-store";
+import { db } from "@/lib/db";
+import { getTask, setTask, type TaskState } from "@/lib/task-store";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+/**
+ * GET /api/tasks/status/[id]
+ *
+ * Returns the current status of a task for the client polling loop. Falls
+ * back to the SQLite DB when the task is not in the in-memory store — without
+ * this fallback, polling for a task that survived a server restart would 404
+ * forever, soft-locking the UI spinner (the client's `pollStatus` silently
+ * returns on !ok without ever clearing `scanning(true)`).
+ *
+ * For DB-backed tasks we know the task is terminal (the in-memory pipeline
+ * died with the process), so we return the persisted status/step/progress
+ * directly. This lets the client stop polling and render the final state.
+ */
 export async function GET(
   _req: NextRequest,
   ctx: { params: Promise<{ id: string }> },
 ) {
   const { id } = await ctx.params;
-  const task = getTask(id);
+  let task = getTask(id);
+  // ── DB fallback ──
+  if (!task) {
+    try {
+      const row = await db.task.findUnique({ where: { id } });
+      if (row) {
+        task = {
+          id: row.id,
+          query: row.query,
+          category: row.category as TaskState["category"],
+          status: row.status as TaskState["status"],
+          progress: row.progress,
+          step: row.step ?? "",
+          error: row.error ?? undefined,
+          warnings: [],
+          degraded: row.degraded,
+          startedAt: row.createdAt.getTime(),
+          finishedAt: row.updatedAt.getTime(),
+          logs: [],
+        } as TaskState;
+        setTask(id, task);
+      }
+    } catch {
+      /* ignore DB errors — fall through to 404 */
+    }
+  }
   if (!task) {
     return NextResponse.json({ error: "task not found" }, { status: 404 });
   }

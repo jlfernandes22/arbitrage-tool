@@ -10,6 +10,10 @@ function csvEscape(v: string | number | undefined | null): string {
   return s;
 }
 export function listingsToCsv(listings: EvaluatedListing[]): string {
+  // Headers include the decision-critical fields that were previously
+  // omitted: regionVersion, lockStatus (a locked CN iPhone is worthless in
+  // PT), sellerRating, conditionFlags, href, description. Without these the
+  // CSV is useless for downstream arbitrage decisions.
   const headers = [
     "Product",
     "Condition",
@@ -37,10 +41,25 @@ export function listingsToCsv(listings: EvaluatedListing[]): string {
     "Seller_Location",
     "Seller_Verified",
     "Seller_Transactions",
+    "Seller_Rating",
     "Wants_Count",
     "Image_Count",
+    "Condition_Flags",
+    "Region_Version",
+    "Lock_Status",
+    "Storage_GB",
+    "Color",
+    "Chip",
+    "RAM_GB",
+    "Display_Inch",
+    "Battery_Health",
+    "Release_Year",
+    "Form_Factor",
+    "Drive_Config",
+    "Goofish_Href",
     "EU_Comps_Count",
     "Goofish_Title",
+    "Description",
   ];
   const rows = listings.map((l) => {
     const n = l.listing.normalized;
@@ -73,10 +92,25 @@ export function listingsToCsv(listings: EvaluatedListing[]): string {
       l.listing.sellerLocation,
       l.listing.sellerVerified ? "YES" : "NO",
       l.listing.sellerVerifiedTransactions,
+      l.listing.sellerRating ?? "",
       l.listing.wantsCount,
-      l.listing.imageUrls.length,
+      l.listing.imageCount ?? l.listing.imageUrls.length,
+      (l.listing.conditionFlags ?? []).join(" | "),
+      n?.regionVersion ?? "",
+      n?.lockStatus ?? "",
+      n?.storageGB ?? "",
+      n?.color ?? "",
+      n?.chip ?? "",
+      n?.ramGB ?? "",
+      n?.displayInch ?? "",
+      n?.batteryHealth ?? "",
+      n?.releaseYear ?? "",
+      n?.formFactor ?? "",
+      n?.driveConfig ?? "",
+      l.listing.href ?? "",
       l.euComps.length,
       l.listing.title,
+      l.listing.description,
     ].map(csvEscape).join(",");
   });
   return [headers.join(","), ...rows].join("\n");
@@ -126,8 +160,11 @@ export function listingsToJson(listings: EvaluatedListing[], query: string): str
           location: l.listing.sellerLocation,
           verified: l.listing.sellerVerified,
           verifiedTransactions: l.listing.sellerVerifiedTransactions,
+          rating: l.listing.sellerRating ?? null,
         },
         wantsCount: l.listing.wantsCount,
+        imageCount: l.listing.imageCount ?? l.listing.imageUrls.length,
+        conditionFlags: l.listing.conditionFlags ?? [],
         normalized: n
           ? {
               standardKey: n.standardKey,
@@ -138,6 +175,17 @@ export function listingsToJson(listings: EvaluatedListing[], query: string): str
               color: n.color ?? null,
               condition: n.condition,
               conditionRaw: n.conditionRaw ?? null,
+              // Decision-critical fields previously omitted from JSON export:
+              regionVersion: n.regionVersion ?? null,
+              lockStatus: n.lockStatus ?? null,
+              chip: n.chip ?? null,
+              ramGB: n.ramGB ?? null,
+              displayInch: n.displayInch ?? null,
+              batteryHealth: n.batteryHealth ?? null,
+              releaseYear: n.releaseYear ?? null,
+              formFactor: n.formFactor ?? null,
+              driveConfig: n.driveConfig ?? null,
+              connectivity: n.connectivity ?? null,
             }
           : null,
         scam: {
@@ -179,6 +227,15 @@ export function listingsToJson(listings: EvaluatedListing[], query: string): str
           priceEur: c.priceEur,
           condition: c.condition,
           location: c.location ?? null,
+          // Previously omitted — these distinguish retail vs peer-to-peer
+          // and carry seller-quality signal.
+          vendorType: c.vendorType ?? null,
+          brand: c.brand ?? null,
+          sellerStars: c.sellerStars ?? null,
+          bundleDiscount: c.bundleDiscount ?? null,
+          negotiable: c.negotiable ?? null,
+          viewCount: c.viewCount ?? null,
+          isRetail: c.isRetail ?? (c.platform === "kuantokusta" || c.platform === "amazon"),
         })),
         hidden: l.hidden,
         hiddenReason: l.hiddenReason ?? null,

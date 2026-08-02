@@ -433,13 +433,17 @@ export function ControlPanel({
   const applyPresetConservative = () => {
     setCostMode(costMode === "conservative" ? "custom" : "conservative");
   };
-  // Deep Scan: sets realistic costs + cranks all sites to 6 pages.
+  // Deep Scan: sets realistic costs + cranks ALL sites to 6 pages.
+  // Previously KuantoKusta + Amazon were left at whatever the user had set,
+  // making the "Deep Scan (6 pages)" label misleading for those two sites.
   const applyPresetDeepScan = () => {
     setCostMode("realistic");
     setMaxPages(6);
     setGoofishPages(6);
     setOlxPages(6);
     setVintedPages(6);
+    setKkPages(6);
+    setAmazonPages(6);
   };
   return (
     <div className="space-y-5">

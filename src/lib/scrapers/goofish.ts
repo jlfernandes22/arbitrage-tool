@@ -16,6 +16,7 @@
 import { config } from "@/lib/config";
 import type { Category, GoofishListing } from "@/lib/engine/types";
 import { normalizeListing } from "@/lib/engine/normalizer";
+import { includesNonNegated } from "@/lib/engine/scam-detector";
 import { createContext } from "./browser";
 import { chromium } from "playwright";
 export interface GoofishScrapeResult {
@@ -304,7 +305,16 @@ export function parseGoofishHtml(html: string): GoofishListing[] {
       const description = m[3];
       const picUrl = m[4];
       if (!title || !priceCny) continue;
-      const imageUrls = picUrl ? [picUrl.replace(/\\\//g, "/")] : [];
+      const rawPic = picUrl ? picUrl.replace(/\\\//g, "/") : "";
+      const imageUrls = rawPic
+        ? [rawPic.startsWith("//")
+          ? `https:${rawPic}`
+          : rawPic.startsWith("http")
+            ? rawPic
+            : rawPic.startsWith("/")
+              ? `https://www.goofish.com${rawPic}`
+              : rawPic]
+        : [];
       const normalized = normalizeListing(title, description);
       listings.push({
         id: `gf-real-${idx}`,
@@ -559,7 +569,13 @@ async function scrapeGoofishLive(
     // Also walks up from the title to find a wrapping <a> (Goofish sometimes
     // wraps the whole card in an anchor) and checks descendants too.
     const extractListings = async () => {
-      return await page.evaluate(() => {
+      // `page` is assigned earlier in the retry loop body before this closure
+      // is invoked. Capture it in a local const so TypeScript can prove
+      // non-nullability inside the closure (otherwise it flags
+      // "page is possibly null" because the outer `let page` is nullable).
+      const activePage = page;
+      if (!activePage) return [];
+      return await activePage.evaluate(() => {
         const results: Array<{
           title: string; priceText: string; description: string;
           imageUrl: string; href: string; location: string;
@@ -825,6 +841,14 @@ async function scrapeGoofishLive(
         // Goofish returned a "no results" page with unrelated recommendations.
         // This happens when Baxia CAPTCHA blocks the search query.
         // Don't extract any listings — return empty with a clear warning.
+        // CRITICAL: close the browser context + browser before returning.
+        // The `ctx` and `freshBrowser` were created OUTSIDE the retry loop
+        // (lines ~348-365); without this cleanup every "no results" page
+        // would leak a full Chromium process, eventually exhausting file
+        // descriptors and memory.
+        if (page) await page.close().catch(() => {});
+        await ctx.close().catch(() => {});
+        await freshBrowser.close().catch(() => {});
         return {
           listings: [],
           status: `LIVE OK (Playwright, 0 listings) | WARNING: Goofish returned "no results" page (showing recommendations). Baxia CAPTCHA likely blocked the search. Try again later or use Manual Paste.`,
@@ -924,7 +948,15 @@ async function scrapeGoofishLive(
           title: r.title,
           priceCny,
           description: r.description,
-          imageUrls: r.imageUrl ? [r.imageUrl] : [],
+          imageUrls: r.imageUrl
+            ? [r.imageUrl.startsWith("//")
+              ? `https:${r.imageUrl}`
+              : r.imageUrl.startsWith("http")
+                ? r.imageUrl
+                : r.imageUrl.startsWith("/")
+                  ? `https://www.goofish.com${r.imageUrl}`
+                  : r.imageUrl]
+            : [],
           sellerLocation: r.location,
           wantsCount: 0,
           sellerVerified: false,
@@ -1058,10 +1090,12 @@ function detectConditionFlags(listing: GoofishListing): void {
   const flags: string[] = [];
   // Check "无拆修" (Never Opened) FIRST — if present, no repair flags
   const hasNeverOpened = fullText.includes("无拆修") || fullText.includes("无拆无修");
-  // Check for repair/replacement indicators
-  const hasScreenReplaced = /换屏|换过屏幕/.test(fullText);
-  const hasBatteryReplaced = /换电池|换过电池/.test(fullText);
-  const hasRepaired = /维修|拆修/.test(fullText) && !hasNeverOpened;
+  // Check for repair/replacement indicators (negation-aware)
+  // "无拆修" (no disassembly) should NOT trigger "拆修" — the seller is
+  // explicitly stating no repairs were done.
+  const hasScreenReplaced = includesNonNegated(fullText, "换屏") || includesNonNegated(fullText, "换过屏幕");
+  const hasBatteryReplaced = includesNonNegated(fullText, "换电池") || includesNonNegated(fullText, "换过电池");
+  const hasRepaired = includesNonNegated(fullText, "维修") || includesNonNegated(fullText, "拆修");
   const hasAnyRepair = hasScreenReplaced || hasBatteryReplaced || hasRepaired;
   // If "无拆修" is present AND no repair indicators, show "Never Opened"
   if (hasNeverOpened && !hasAnyRepair) {
@@ -1075,9 +1109,16 @@ function detectConditionFlags(listing: GoofishListing): void {
   if (hasBatteryReplaced) flags.push("Battery Replaced");
   // Other flags — independent
   if (/无盒|无原盒/.test(fullText)) flags.push("No Box");
-  if (fullText.includes("进水")) flags.push("Water Damage");
-  if (fullText.includes("漏液")) flags.push("Screen Leak");
-  if (fullText.includes("碎屏")) flags.push("Cracked Screen");
+  // Use negation-aware matching: "无进水" (no water damage) should NOT
+  // trigger the Water Damage flag — the seller is explicitly stating no
+  // water damage. Instead, show a positive "No Water Damage" flag.
+  if (includesNonNegated(fullText, "进水")) {
+    flags.push("Water Damage");
+  } else if (fullText.includes("无进水") || fullText.includes("没进水")) {
+    flags.push("No Water Damage");
+  }
+  if (includesNonNegated(fullText, "漏液")) flags.push("Screen Leak");
+  if (includesNonNegated(fullText, "碎屏")) flags.push("Cracked Screen");
   if (fullText.includes("有锁")) flags.push("Locked");
   // "全原" (All Original) — only if NO repair flags
   if (fullText.includes("全原") && !hasAnyRepair) flags.push("All Original");
@@ -1188,6 +1229,12 @@ async function enrichListingsFromPages(
                 '[class*="item-main-window"] img, [class*="main-image"] img, [class*="detail-image"] img',
               );
             }
+            // Additional fallbacks: try more selectors used by Goofish
+            if (imageEls.length === 0) {
+              imageEls = document.querySelectorAll(
+                '[class*="pic"] img, [class*="gallery"] img, [class*="slider"] img, [class*="carousel"] img, [class*="swiper"] img',
+              );
+            }
             const imageCount = imageEls.length;
 
             // 3. Full image URLs from listing page
@@ -1204,6 +1251,25 @@ async function enrichListingsFromPages(
                 imageUrls.push(fullUrl);
               }
             });
+
+            // Fallback: if we found imageCount but no URLs, try ALL images
+            // with alicdn.com in the src (Goofish CDN domain)
+            if (imageCount > 0 && imageUrls.length === 0) {
+              const allImgs = document.querySelectorAll(
+                'img[src*="alicdn.com"], img[data-src*="alicdn.com"]',
+              );
+              allImgs.forEach((img) => {
+                const src = img.getAttribute("src") || img.getAttribute("data-src") || "";
+                if (src) {
+                  const fullUrl = src.startsWith("//")
+                    ? `https:${src}`
+                    : src.startsWith("http")
+                      ? src
+                      : `https:${src}`;
+                  imageUrls.push(fullUrl);
+                }
+              });
+            }
 
             return { sellerRating, imageCount, imageUrls };
           });

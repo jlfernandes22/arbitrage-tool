@@ -20,6 +20,7 @@ import {
 import { TrendingUp } from "lucide-react";
 import type { EvaluatedListing } from "./types";
 import { eur } from "./types";
+import { useChartTheme } from "./use-chart-theme";
 interface ProfitChartProps {
   listings: EvaluatedListing[];
 }
@@ -55,6 +56,7 @@ function shortLabel(n: EvaluatedListing, idx: number): string {
   return `#${idx + 1}`;
 }
 export function ProfitChart({ listings }: ProfitChartProps) {
+  const theme = useChartTheme();
   const data: ChartDatum[] = useMemo(() => {
     return listings.map((l, idx) => ({
       name: l.listing.normalized?.standardKey ?? l.listing.title,
@@ -93,10 +95,10 @@ export function ProfitChart({ listings }: ProfitChartProps) {
             data={data}
             margin={{ top: 8, right: 8, left: -8, bottom: 0 }}
           >
-            <CartesianGrid strokeDasharray="3 3" stroke="#e5e5e5" vertical={false} />
+            <CartesianGrid strokeDasharray="3 3" stroke={theme.grid} vertical={false} />
             <XAxis
               dataKey="shortName"
-              tick={{ fontSize: 10, fill: "#888" }}
+              tick={{ fontSize: 10, fill: theme.axis }}
               tickLine={false}
               axisLine={false}
               angle={-30}
@@ -105,19 +107,18 @@ export function ProfitChart({ listings }: ProfitChartProps) {
               interval={0}
             />
             <YAxis
-              tick={{ fontSize: 10, fill: "#888" }}
+              tick={{ fontSize: 10, fill: theme.axis }}
               tickLine={false}
               axisLine={false}
               tickFormatter={(v) => `€${v}`}
             />
             <Tooltip
-              cursor={{ fill: "oklch(0.97 0 0)", opacity: 0.5 }}
+              cursor={{ fill: theme.cursor, opacity: 0.5 }}
               contentStyle={{
-                // Solid white background (rgba for cross-browser reliability) so
-                // tooltip text is always readable over bars. zIndex ensures the
-                // tooltip floats above other page elements (sticky header, etc.).
-                backgroundColor: "rgba(255, 255, 255, 0.98)",
-                border: "1px solid oklch(0.9 0 0)",
+                // Theme-aware: uses the resolved palette so the tooltip is
+                // readable over both light cards and dark cards.
+                backgroundColor: theme.tooltipBg,
+                border: `1px solid ${theme.tooltipBorder}`,
                 borderRadius: "8px",
                 fontSize: "12px",
                 padding: "8px 12px",
@@ -125,8 +126,8 @@ export function ProfitChart({ listings }: ProfitChartProps) {
                 zIndex: 9999,
               }}
               wrapperStyle={{ zIndex: 9999 }}
-              labelStyle={{ color: "#111", fontWeight: 600, marginBottom: "4px", display: "block" }}
-              itemStyle={{ color: "#333" }}
+              labelStyle={{ color: theme.tooltipLabel, fontWeight: 600, marginBottom: "4px", display: "block" }}
+              itemStyle={{ color: theme.tooltipItem }}
               formatter={(value: number, _name, props) => {
                 const d = props.payload as ChartDatum;
                 return [
@@ -139,7 +140,7 @@ export function ProfitChart({ listings }: ProfitChartProps) {
                 return d?.name ?? "";
               }}
             />
-            <ReferenceLine y={0} stroke="#e5e5e5" strokeWidth={1} />
+            <ReferenceLine y={0} stroke={theme.referenceLine} strokeWidth={1} />
             <Bar dataKey="netProfit" radius={[3, 3, 0, 0]} maxBarSize={48}>
               {data.map((d, i) => (
                 <Cell key={i} fill={barColor(d)} />

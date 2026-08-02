@@ -73,12 +73,13 @@ export interface ResultsTableHandle {
   copyActiveMarkdown: () => void;
 }
 export const ResultsTable = forwardRef<ResultsTableHandle, ResultsTableProps>(function ResultsTable({
-  listings,
+  listings: rawListings,
   showHidden,
   onToggleHidden,
   cardFilter = null,
   heatmapFilter = null,
 }, ref) {
+  const listings = Array.isArray(rawListings) ? rawListings : [];
   const [sortKey, setSortKey] = useState<SortKey>("netProfit");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [selected, setSelected] = useState<EvaluatedListing | null>(null);

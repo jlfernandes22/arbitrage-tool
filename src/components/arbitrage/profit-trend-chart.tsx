@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/card";
 import { History, TrendingUp, TrendingDown, Minus } from "lucide-react";
 import { eur } from "./types";
+import { useChartTheme } from "./use-chart-theme";
 
 interface HistoryTaskSummary {
   bestProfitEur: number;
@@ -60,6 +61,7 @@ function formatTimeLabel(iso: string): { label: string; shortLabel: string } {
 }
 
 export function ProfitTrendChart({ tasks, refreshKey }: ProfitTrendChartProps) {
+  const theme = useChartTheme();
   const [fetched, setFetched] = useState<HistoryTask[]>([]);
 
   useEffect(() => {
@@ -160,17 +162,17 @@ export function ProfitTrendChart({ tasks, refreshKey }: ProfitTrendChartProps) {
                 <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
               </linearGradient>
             </defs>
-            <CartesianGrid strokeDasharray="3 3" stroke="#e5e5e5" vertical={false} />
+            <CartesianGrid strokeDasharray="3 3" stroke={theme.grid} vertical={false} />
             <XAxis
               dataKey="shortLabel"
-              tick={{ fontSize: 10, fill: "#888" }}
+              tick={{ fontSize: 10, fill: theme.axis }}
               tickLine={false}
               axisLine={false}
               interval="preserveStartEnd"
               minTickGap={20}
             />
             <YAxis
-              tick={{ fontSize: 10, fill: "#888" }}
+              tick={{ fontSize: 10, fill: theme.axis }}
               tickLine={false}
               axisLine={false}
               tickFormatter={(v) => `€${v}`}
@@ -178,8 +180,8 @@ export function ProfitTrendChart({ tasks, refreshKey }: ProfitTrendChartProps) {
             />
             <Tooltip
               contentStyle={{
-                backgroundColor: "rgba(255, 255, 255, 0.98)",
-                border: "1px solid oklch(0.9 0 0)",
+                backgroundColor: theme.tooltipBg,
+                border: `1px solid ${theme.tooltipBorder}`,
                 borderRadius: "8px",
                 fontSize: "12px",
                 padding: "8px 12px",
@@ -187,20 +189,27 @@ export function ProfitTrendChart({ tasks, refreshKey }: ProfitTrendChartProps) {
                 zIndex: 9999,
               }}
               wrapperStyle={{ zIndex: 9999 }}
-              labelStyle={{ color: "#111", fontWeight: 600, marginBottom: "4px", display: "block" }}
-              itemStyle={{ color: "#333" }}
-              labelFormatter={(_, payload) => {
-                const d = payload?.[0]?.payload as TrendDatum | undefined;
+              labelStyle={{ color: theme.tooltipLabel, fontWeight: 600, marginBottom: "4px", display: "block" }}
+              itemStyle={{ color: theme.tooltipItem }}
+              labelFormatter={(_: unknown, payload: unknown) => {
+                // Cast payload to the structural shape we actually use.
+                // Recharts' labelFormatter generic (`Payload<ValueType, NameType>[]`)
+                // doesn't match the Tooltip's `<number, string>` instantiation,
+                // which trips a TS2769 overload error. Typing the param as
+                // `unknown` and narrowing via cast is type-safe and avoids the
+                // recharts generic mismatch.
+                const arr = payload as Array<{ payload?: TrendDatum }>;
+                const d = arr?.[0]?.payload;
                 return d ? `${d.label} · ${d.query}` : "";
               }}
-              formatter={(value: number, name) => {
+              formatter={(value: number, name: string) => {
                 if (name === "bestProfit") {
-                  return [eur(value), "Best profit"];
+                  return [eur(value), "Best profit"] as [string, string];
                 }
-                return [String(value), name];
+                return [String(value), String(name)] as [string, string];
               }}
             />
-            <ReferenceLine y={0} stroke="#e5e5e5" strokeWidth={1} />
+            <ReferenceLine y={0} stroke={theme.referenceLine} strokeWidth={1} />
             <Area
               type="monotone"
               dataKey="bestProfit"

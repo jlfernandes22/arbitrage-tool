@@ -118,9 +118,16 @@ function parseKkHtml(html: string, baseUrl: string): Array<{ title: string; pric
 /**
  * Try a plain HTTP fetch first — this has a different TLS fingerprint than
  * Playwright's headless Chrome and is less likely to be blocked by Akamai.
+ *
+ * `page` is forwarded to `buildKuantokustaSearchUrl` so multi-page fetching
+ * actually advances past page 1. Previously this function ignored the page
+ * parameter entirely, so the multi-page loop in `scrapeKuantokustaLive` would
+ * fetch the same page 1 every iteration and then `break` (because dedup
+ * reported `newCount === 0` on iteration 2). Multi-page fetching was silently
+ * broken for the HTTP strategy.
  */
-async function fetchKkHtml(euQuery: string): Promise<{ html: string | null; status: number }> {
-  const url = buildKuantokustaSearchUrl(euQuery);
+async function fetchKkHtml(euQuery: string, page: number = 1): Promise<{ html: string | null; status: number }> {
+  const url = buildKuantokustaSearchUrl(euQuery, page);
   try {
     const res = await fetch(url, {
       signal: AbortSignal.timeout(15000),
@@ -165,7 +172,7 @@ async function scrapeKuantokustaLive(
 
   // Strategy 1: Plain HTTP fetch (less likely to be blocked)
   for (let pageNum = 1; pageNum <= maxPages; pageNum++) {
-    const { html, status } = await fetchKkHtml(euQuery);
+    const { html } = await fetchKkHtml(euQuery, pageNum);
     if (html) {
       const items = parseKkHtml(html, buildKuantokustaSearchUrl(euQuery, pageNum));
       let newCount = 0;

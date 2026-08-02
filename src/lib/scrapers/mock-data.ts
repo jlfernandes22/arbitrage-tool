@@ -75,14 +75,22 @@ function randInt(rng: () => number, min: number, max: number): number {
 // Roughly: EUR_ref * (1/0.127) * 0.5..0.85 (second-hand discount)
 function cnyPriceFor(product: NormalizedProduct | null, rng: () => number): number {
   if (!product) return randInt(rng, 500, 4000);
-  // base on category
+  // base on category. All 9 categories must be present, otherwise
+  // `base[product.category]` returns undefined and every downstream
+  // arithmetic op produces NaN (which then silently propagates into the
+  // profit calc and DB). Previously only 4 of 9 were defined.
   const base: Record<Category, number> = {
     iphone: randInt(rng, 1800, 6500),
     macbook: randInt(rng, 4000, 14000),
     ipad: randInt(rng, 1800, 5500),
     ps5: randInt(rng, 1800, 3200),
+    samsung: randInt(rng, 1500, 5500),
+    applewatch: randInt(rng, 900, 3200),
+    dji: randInt(rng, 1200, 6500),
+    xiaomi: randInt(rng, 800, 3500),
+    gaming: randInt(rng, 1500, 4500),
   };
-  let p = base[product.category];
+  let p = base[product.category] ?? randInt(rng, 1000, 3000);
   // storage bump
   if (product.storageGB && product.storageGB >= 256) p += 500;
   if (product.storageGB && product.storageGB >= 512) p += 1200;
@@ -235,14 +243,21 @@ export function generateEuComps(
   const rng = mulberry32(seed);
   const count = randInt(rng, 3, 8);
   const comps: EuMarketComp[] = [];
-  // Base EUR price from category
+  // Base EUR price from category. All 9 categories must be present;
+  // otherwise the median resale calculation receives NaN and the
+  // profit analysis silently produces NaN margins.
   const baseEur: Record<Category, number> = {
     iphone: randInt(rng, 250, 950),
     macbook: randInt(rng, 700, 2200),
     ipad: randInt(rng, 250, 850),
     ps5: randInt(rng, 280, 520),
+    samsung: randInt(rng, 200, 850),
+    applewatch: randInt(rng, 120, 450),
+    dji: randInt(rng, 180, 950),
+    xiaomi: randInt(rng, 120, 500),
+    gaming: randInt(rng, 200, 650),
   };
-  let base = baseEur[product.category];
+  let base = baseEur[product.category] ?? randInt(rng, 200, 800);
   if (product.storageGB && product.storageGB >= 256) base += 80;
   if (product.storageGB && product.storageGB >= 512) base += 200;
   for (let i = 0; i < count; i++) {

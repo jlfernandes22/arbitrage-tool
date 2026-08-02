@@ -4,8 +4,10 @@
   "private": true,
   "scripts": {
     "dev": "next dev -p 3000",
+    "dev:restart": "lsof -ti:3000 | xargs kill -9 2>/dev/null; sleep 1; next dev -p 3000",
     "build": "next build && cp -r .next/static .next/standalone/.next/ && cp -r public .next/standalone/ && cp -r db .next/standalone/ && cp .env .next/standalone/ && cp node_modules/playwright-core/browsers.json .next/standalone/node_modules/playwright-core/ && cp -r node_modules/playwright-core/lib .next/standalone/node_modules/playwright-core/",
     "start": "NODE_ENV=production bun .next/standalone/server.js 2>&1 | tee server.log",
+    "start:restart": "lsof -ti:3000 | xargs kill -9 2>/dev/null; sleep 1; NODE_ENV=production bun .next/standalone/server.js 2>&1 | tee server.log",
     "lint": "eslint .",
     "db:push": "prisma db push",
     "db:generate": "prisma generate",

@@ -1,5 +1,11 @@
 // engine/forex.ts
 // Forex rate service with SQLite cache (TTL 1 hour) and graceful fallback.
+//
+// Resolution order: cache (DB) → live API → user-configured `cny_to_eur_rate`
+// → static `fallback_rate`. The user-configured rate is set via the UI control
+// panel and merged into `config.forex.cny_to_eur_rate` by `resolveConfig`.
+// Previously this field was dead — the UI wrote to it but forex.ts only read
+// `fallback_rate`, so the user's manual rate override had no effect.
 import { db } from "@/lib/db";
 import { config } from "@/lib/config";
 const FOREX_TTL_MS = config.forex.ttl_seconds * 1000;
@@ -53,6 +59,11 @@ export async function getCnyToEurRate(): Promise<{
   } catch {
     // network blocked / timeout — fall back
   }
-  // Fallback to hardcoded rate
-  return { rate: config.forex.fallback_rate, source: "fallback" };
+  // Fallback: prefer the user-configured `cny_to_eur_rate` (set via UI /
+  // config overrides) so the user's manual rate actually takes effect when
+  // the live API is unreachable. Fall back to the static `fallback_rate`
+  // only if the user-configured value is missing or invalid (≤ 0).
+  const userRate = config.forex.cny_to_eur_rate;
+  const rate = userRate && userRate > 0 ? userRate : config.forex.fallback_rate;
+  return { rate, source: "fallback" };
 }
