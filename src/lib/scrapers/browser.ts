@@ -149,3 +149,17 @@ export async function closeBrowser(): Promise<void> {
     browserInstance = null;
   }
 }
+
+/**
+ * Close the browser on process termination signals so no zombie Chromium
+ * processes are left behind after Ctrl+C / SIGTERM. The pending
+ * browser.close() keeps the event loop alive until Chromium has exited.
+ */
+async function handleShutdownSignal(signal: string): Promise<void> {
+  if (browserInstance) {
+    console.log(`[browser] Received ${signal} — closing Chromium…`);
+    await closeBrowser();
+  }
+}
+process.once("SIGTERM", () => void handleShutdownSignal("SIGTERM"));
+process.once("SIGINT", () => void handleShutdownSignal("SIGINT"));

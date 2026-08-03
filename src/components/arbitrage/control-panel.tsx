@@ -45,7 +45,7 @@ import {
 } from "./types";
 interface ControlPanelProps {
   onScan: (query: string, category: Category, overrides: AppConfigOverrides) => void;
-  onManualPaste: (html: string) => void;
+  onManualPaste: (html: string) => boolean | Promise<boolean>;
   onStop?: () => void;
   onConfigChange?: (overrides: AppConfigOverrides) => void;
   scanning: boolean;
@@ -54,6 +54,7 @@ interface ControlPanelProps {
   setQuery: (q: string) => void;
   category: Category;
   setCategory: (c: Category) => void;
+  stopping?: boolean;
 }
 export function ControlPanel({
   onScan,
@@ -66,13 +67,16 @@ export function ControlPanel({
   setQuery,
   category,
   setCategory,
+  stopping = false,
 }: ControlPanelProps) {
   const [configOpen, setConfigOpen] = useState(false);
   const [pasteOpen, setPasteOpen] = useState(false);
   const [pasteHtml, setPasteHtml] = useState("");
-  // Goofish debug diagnostics
+  // Goofish debug diagnostics. `debugRunning` tracks WHICH scraper is
+  // currently executing so only that button shows the loading spinner
+  // (a single boolean made every button look busy at once).
   const [debugOpen, setDebugOpen] = useState(false);
-  const [debugLoading, setDebugLoading] = useState(false);
+  const [debugRunning, setDebugRunning] = useState<string | null>(null);
   const [debugResult, setDebugResult] = useState<string | null>(null);
   // config overrides
   const [cnyToEur, setCnyToEur] = useState(0.127);
@@ -170,44 +174,10 @@ export function ControlPanel({
   const effMinProfit = isConversion ? 0 : isRealistic ? 30 : isConservative ? 50 : minProfit;
   const effScamThreshold = isConversion ? 100 : isRealistic ? 60 : isConservative ? 40 : scamThreshold;
   // Notify parent whenever config values change so re-run can use current values.
+  // Reuses buildOverrides() so the parent always sees EXACTLY the config that
+  // the Start Scan button submits — no duplicated logic to drift apart.
   useEffect(() => {
-    onConfigChange?.({
-      forex: { cny_to_eur_rate: cnyToEur, exchange_fee: effExchangeFee / 100 },
-      logistics: {
-        forwarder_type: forwarderType,
-        agent_service_fee_rate: effAgentServiceFee / 100,
-        inspection_fee_eur: effInspectionFee,
-        domestic_shipping_cn_eur: effDomesticShippingCn,
-        insurance_fee_rate: effInsuranceFee / 100,
-        international_shipping_eur: effInternationalShip,
-        customs_clearance_fee_eur: effClearance,
-        import_duty_rate: effImportDutyRate / 100,
-        domestic_shipping_eur: effDomesticShip,
-      },
-      tax: { pt_vat_rate: effVatRate / 100 },
-      profitability: {
-        min_margin_pct: effMinMargin / 100,
-        min_net_profit_eur: effMinProfit,
-      },
-      scam_filter: { hide_threshold: effScamThreshold },
-      scraping: {
-        max_pages: maxPages,
-        goofish_pages: goofishPages,
-        olx_pages: olxPages,
-        vinted_pages: vintedPages,
-        kuantokusta_pages: kkPages,
-        amazon_pages: amazonPages,
-        skip_vinted: skipVinted,
-        skip_olx: skipOlx,
-        skip_kuantokusta: skipKk,
-        skip_amazon: skipAmazon,
-        skip_new: skipNew,
-        skip_used: skipUsed,
-        min_price_cny: minPriceCny,
-        max_price_cny: maxPriceCny,
-        enrich_all: enrichAll,
-      },
-    });
+    onConfigChange?.(buildOverrides());
   }, [cnyToEur, effExchangeFee, effVatRate, effAgentServiceFee, effInspectionFee, effDomesticShippingCn, effInsuranceFee, effInternationalShip, effClearance, effImportDutyRate, effDomesticShip, effMinMargin, effMinProfit, effScamThreshold, maxPages, goofishPages, olxPages, vintedPages, kkPages, amazonPages, skipVinted, skipOlx, skipKk, skipAmazon, skipNew, skipUsed, minPriceCny, maxPriceCny, enrichAll, costMode, forwarderType, onConfigChange]);
   // ── Wizard state: Brand → Product Type → Range → Generation → Model ──
   const [selectedBrand, setSelectedBrand] = useState<string | null>(null);
@@ -220,29 +190,63 @@ export function ControlPanel({
   const productType = brand?.productTypes.find((pt) => pt.id === selectedProductTypeId);
   const allGenerations = productType?.generations ?? [];
   // ── Auto-detect brand/model from query on re-run ─────────────────
-  // When a user re-runs a search from history, `query` and `category`
-  // are set by the parent but wizard state (selectedBrand etc.) stays
-  // null. This effect detects the matching brand+model from the query
-  // so the wizard UI shows the correct path.
+  // When a user clicks a history entry (or re-runs a scan), the parent
+  // sets `query` + `category` but wizard state (selectedBrand etc.) stays
+  // stale. This effect detects the matching brand → product type → range
+  // → generation → model from the query so the wizard UI shows the same
+  // path as the original scan. It also handles storage-suffixed queries
+  // (e.g. "iPhone 15 Pro 256GB") by stripping the suffix before matching
+  // and restoring the storage filter.
+  //
+  // If the query matches NO catalog model, the wizard is cleared so the
+  // selection chips never contradict the search box — unless the user has
+  // manually picked wizard steps AFTER this query arrived (typing in the
+  // manual-query box must not clobber an in-progress wizard selection).
+  const wizardTouchedRef = useRef(false);
   useEffect(() => {
     if (!query.trim() || !category) return;
+    // A new query means a fresh slate — any manual wizard interaction is
+    // relative to the OLD query and no longer authoritative.
+    wizardTouchedRef.current = false;
+    const q = query.trim().toLowerCase();
+    // Strip a trailing storage suffix ("256GB" / "1TB") so it doesn't
+    // break the exact model-query match.
+    const baseQuery = q.replace(/\s*\d+\s*(gb|tb)$/i, "");
+    const storageMatch = q.match(/(\d+)\s*(gb|tb)$/);
     // Find matching preset by query string
     for (const b of BRAND_CATALOG) {
       for (const pt of b.productTypes) {
         if (pt.category !== category) continue;
         for (const g of pt.generations) {
           for (const m of g.models) {
-            if (m.query.toLowerCase() === query.trim().toLowerCase()) {
+            if (m.query.toLowerCase() === baseQuery) {
               setSelectedBrand(b.id);
               setSelectedProductTypeId(pt.id);
               setSelectedRange(g.range ?? null);
               setSelectedGen(g.id);
               setSelectedPresetLabel(m.label);
+              // Storage chip must mirror the query: suffix → size, none → All.
+              setStorageFilter(
+                storageMatch
+                  ? (storageMatch[2] === "tb" ? "1024" : storageMatch[1])
+                  : "all",
+              );
               return;
             }
           }
         }
       }
+    }
+    // No catalog model matches this query — clear stale wizard state so the
+    // UI doesn't claim a selection it doesn't have. Skip when the user is
+    // actively building a wizard selection (manual-query typing).
+    if (!wizardTouchedRef.current) {
+      setSelectedBrand(null);
+      setSelectedProductTypeId(null);
+      setSelectedRange(null);
+      setSelectedGen(null);
+      setSelectedPresetLabel(null);
+      setStorageFilter("all");
     }
   }, [query, category]);
   // Filter generations by range if the product type has range filtering
@@ -255,6 +259,7 @@ export function ControlPanel({
   const selectedGeneration = generations.find((g) => g.id === selectedGen);
 
   const handleBrandSelect = (brandId: string) => {
+    wizardTouchedRef.current = true;
     setSelectedBrand(brandId);
     setSelectedProductTypeId(null);
     setSelectedGen(null);
@@ -263,6 +268,7 @@ export function ControlPanel({
     setStorageFilter("all");
   };
   const handleProductTypeSelect = (pt: ProductType) => {
+    wizardTouchedRef.current = true;
     setSelectedProductTypeId(pt.id);
     setCategory(pt.category);
     setSelectedRange(null);
@@ -272,6 +278,7 @@ export function ControlPanel({
     setStorageFilter("all");
   };
   const handleRangeSelect = (range: string) => {
+    wizardTouchedRef.current = true;
     setSelectedRange(range);
     setSelectedGen(null);
     setSelectedPresetLabel(null);
@@ -279,6 +286,7 @@ export function ControlPanel({
     setStorageFilter("all");
   };
   const handleGenSelect = (genId: string) => {
+    wizardTouchedRef.current = true;
     setSelectedGen(genId);
     setSelectedPresetLabel(null);
     setQuery("");
@@ -325,6 +333,9 @@ export function ControlPanel({
   //    room above and below. Each wizard step is tagged with data-wizard-step.
   const wizardRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
+    // Only scroll when the USER advanced the wizard — the auto-detect
+    // effect (history load / re-run) must not yank the viewport around.
+    if (!wizardTouchedRef.current) return;
     // Small delay so the new step has time to render + layout settles
     const timer = setTimeout(() => {
       if (wizardRef.current) {
@@ -1233,12 +1244,17 @@ export function ControlPanel({
               <Button
                 size="lg"
                 variant="outline"
-                className="h-12 gap-2 border-rose-300 bg-rose-50 px-5 text-sm font-medium text-rose-700 transition-all hover:bg-rose-100 hover:text-rose-800 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-300 dark:hover:bg-rose-950"
+                className="h-12 gap-2 border-rose-300 bg-rose-50 px-5 text-sm font-medium text-rose-700 transition-all hover:bg-rose-100 hover:text-rose-800 disabled:opacity-50 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-300 dark:hover:bg-rose-950"
                 onClick={onStop}
-                title="Cancel the running scan"
+                disabled={stopping}
+                title={stopping ? "Cancelling…" : "Cancel the running scan"}
               >
-                <Square className="h-4 w-4 fill-current" />
-                Stop
+                {stopping ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Square className="h-4 w-4 fill-current" />
+                )}
+                {stopping ? "Cancelling…" : "Stop"}
               </Button>
             )}
           </div>
@@ -1465,9 +1481,12 @@ export function ControlPanel({
               <Button
                 size="sm"
                 disabled={!pasteHtml.trim() || scanning}
-                onClick={() => {
-                  onManualPaste(pasteHtml);
-                  setPasteHtml("");
+                onClick={async () => {
+                  // Only clear the textarea on SUCCESS — a failed resume must
+                  // keep the pasted DOM so the user can retry without having
+                  // to re-copy a huge blob.
+                  const ok = await onManualPaste(pasteHtml);
+                  if (ok) setPasteHtml("");
                 }}
               >
                 Resume Pipeline
@@ -1515,9 +1534,9 @@ export function ControlPanel({
                   variant="outline"
                   size="sm"
                   className={`h-7 gap-1 text-xs ${scraper.color}`}
-                  disabled={debugLoading || !query.trim()}
+                  disabled={debugRunning !== null || !query.trim()}
                   onClick={async () => {
-                    setDebugLoading(true);
+                    setDebugRunning(scraper.name);
                     setDebugResult(null);
                     try {
                       const res = await fetch(`/api/debug/${scraper.name}?query=${encodeURIComponent(query.trim())}`);
@@ -1537,11 +1556,11 @@ export function ControlPanel({
                     } catch (e) {
                       setDebugResult(`Debug failed: ${e instanceof Error ? e.message : String(e)}`);
                     } finally {
-                      setDebugLoading(false);
+                      setDebugRunning(null);
                     }
                   }}
                 >
-                  {debugLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Bug className="h-3 w-3" />}
+                  {debugRunning === scraper.name ? <Loader2 className="h-3 w-3 animate-spin" /> : <Bug className="h-3 w-3" />}
                   {scraper.label}
                 </Button>
               ))}
@@ -1549,9 +1568,9 @@ export function ControlPanel({
               <Button
                 size="sm"
                 className="h-7 gap-1 text-xs"
-                disabled={debugLoading || !query.trim()}
+                disabled={debugRunning !== null || !query.trim()}
                 onClick={async () => {
-                  setDebugLoading(true);
+                  setDebugRunning("all");
                   setDebugResult(null);
                   const scrapers = ["goofish", "olx", "vinted", "kuantokusta", "amazon"];
                   const allResults: string[] = [];
@@ -1566,10 +1585,10 @@ export function ControlPanel({
                     } catch (e) { allResults.push(`  FAILED: ${e instanceof Error ? e.message : String(e)}`); }
                   }
                   setDebugResult(allResults.join("\n"));
-                  setDebugLoading(false);
+                  setDebugRunning(null);
                 }}
               >
-                {debugLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Bug className="h-3 w-3" />}
+                {debugRunning === "all" ? <Loader2 className="h-3 w-3 animate-spin" /> : <Bug className="h-3 w-3" />}
                 Run All
               </Button>
               {debugResult && (

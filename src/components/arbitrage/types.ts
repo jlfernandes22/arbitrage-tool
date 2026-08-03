@@ -61,6 +61,8 @@ export interface EuMarketComp {
   title: string;
   priceEur: number;
   condition: Condition;
+  // Direct link to the marketplace listing (not a search URL).
+  url?: string;
   location?: string;
   vendorType?: string;
   negotiable?: boolean;
@@ -70,10 +72,6 @@ export interface EuMarketComp {
   bundleDiscount?: number;
   // isRetail: true for NEW retail sources (KuantoKusta, Amazon).
   isRetail?: boolean;
-}
-// Helper: is this comp from a NEW/retail source (KuantoKusta, Amazon)?
-export function isRetailComp(c: EuMarketComp): boolean {
-  return c.isRetail === true || c.platform === "kuantokusta" || c.platform === "amazon";
 }
 export interface ScamReport {
   riskScore: number;
@@ -292,11 +290,6 @@ export const BRAND_CATALOG: Brand[] = [
       {
         id: "iphone", category: "iphone", label: "iPhone", emoji: "📱", hasStorage: true, hasRangeFilter: false,
         generations: [
-          gen("iphone-18", "iPhone 18 Series", "2026", [
-            ["iPhone 18", "iPhone 18"], ["iPhone 18 Pro", "iPhone 18 Pro"],
-            ["iPhone 18 Pro Max", "iPhone 18 Pro Max"], ["iPhone 18 Plus", "iPhone 18 Plus"],
-            ["iPhone 18 Air", "iPhone 18 Air"],
-          ]),
           gen("iphone-17", "iPhone 17 Series", "2025", [
             ["iPhone 17", "iPhone 17"], ["iPhone 17 Pro", "iPhone 17 Pro"],
             ["iPhone 17 Pro Max", "iPhone 17 Pro Max"], ["iPhone 17 Plus", "iPhone 17 Plus"],
@@ -307,14 +300,16 @@ export const BRAND_CATALOG: Brand[] = [
             ["iPhone 16 Pro Max", "iPhone 16 Pro Max"], ["iPhone 16 Plus", "iPhone 16 Plus"],
           ]),
           gen("iphone-15", "iPhone 15 Series", "2023", [
-            ["iPhone 15", "iPhone 15"], ["iPhone 15 Pro", "iPhone 15 Pro"],
-            ["iPhone 15 Pro Max", "iPhone 15 Pro Max"],
+            ["iPhone 15", "iPhone 15"], ["iPhone 15 Plus", "iPhone 15 Plus"],
+            ["iPhone 15 Pro", "iPhone 15 Pro"], ["iPhone 15 Pro Max", "iPhone 15 Pro Max"],
           ]),
           gen("iphone-14", "iPhone 14 Series", "2022", [
-            ["iPhone 14", "iPhone 14"], ["iPhone 14 Pro", "iPhone 14 Pro"],
+            ["iPhone 14", "iPhone 14"], ["iPhone 14 Plus", "iPhone 14 Plus"],
+            ["iPhone 14 Pro", "iPhone 14 Pro"], ["iPhone 14 Pro Max", "iPhone 14 Pro Max"],
           ]),
           gen("iphone-13", "iPhone 13 Series", "2021", [
-            ["iPhone 13", "iPhone 13"],
+            ["iPhone 13 Mini", "iPhone 13 Mini"], ["iPhone 13", "iPhone 13"],
+            ["iPhone 13 Pro", "iPhone 13 Pro"], ["iPhone 13 Pro Max", "iPhone 13 Pro Max"],
           ]),
         ],
       },
@@ -1001,7 +996,7 @@ export const BRAND_CATALOG: Brand[] = [
         id: "oneplus-phone", category: "xiaomi", label: "OnePlus Phones", emoji: "📱", hasStorage: true, hasRangeFilter: true,
         generations: [
           gen("oneplus-15", "OnePlus 15 Series", "2025", [
-            ["OnePlus 15", "OnePlus 15"], ["OnePlus 15 Pro", "OnePlus 15 Pro"], ["OnePlus 15R", "OnePlus 15R"],
+            ["OnePlus 15", "OnePlus 15"], ["OnePlus 15R", "OnePlus 15R"],
           ], "Flagship"),
           gen("oneplus-13", "OnePlus 13 Series", "2025", [
             ["OnePlus 13", "OnePlus 13"], ["OnePlus 13T", "OnePlus 13T"],
@@ -1282,7 +1277,7 @@ export const BRAND_CATALOG: Brand[] = [
         generations: [
           gen("galaxy-s26", "Galaxy S26 Series", "2026", [
             ["Galaxy S26 Ultra", "Samsung Galaxy S26 Ultra"], ["Galaxy S26+", "Samsung Galaxy S26 Plus"],
-            ["Galaxy S26 Edge", "Samsung Galaxy S26 Edge"], ["Galaxy S26", "Samsung Galaxy S26"],
+            ["Galaxy S26", "Samsung Galaxy S26"],
           ], "Flagship"),
           gen("galaxy-s25", "Galaxy S25 Series", "2025", [
             ["Galaxy S25 Ultra", "Samsung Galaxy S25 Ultra"], ["Galaxy S25+", "Samsung Galaxy S25 Plus"],
@@ -1500,11 +1495,11 @@ export const BRAND_CATALOG: Brand[] = [
         id: "xiaomi-phone", category: "xiaomi", label: "Xiaomi Phones", emoji: "📱", hasStorage: true, hasRangeFilter: true,
         generations: [
           gen("xiaomi-17", "Xiaomi 17 Series", "2025", [
-            ["Xiaomi 17 Pro Max", "Xiaomi 17 Pro Max"], ["Xiaomi 17 Ultra", "Xiaomi 17 Ultra"], ["Xiaomi 17 Pro", "Xiaomi 17 Pro"],
+            ["Xiaomi 17 Ultra", "Xiaomi 17 Ultra"], ["Xiaomi 17 Pro", "Xiaomi 17 Pro"],
             ["Xiaomi 17", "Xiaomi 17"],
           ], "Flagship"),
           gen("xiaomi-17t", "Xiaomi 17T Series", "2026", [
-            ["Xiaomi 17T Pro Max", "Xiaomi 17T Pro Max"], ["Xiaomi 17T Pro", "Xiaomi 17T Pro"], ["Xiaomi 17T", "Xiaomi 17T"],
+            ["Xiaomi 17T Pro", "Xiaomi 17T Pro"], ["Xiaomi 17T", "Xiaomi 17T"],
           ], "Flagship"),
           gen("xiaomi-15", "Xiaomi 15 Series", "2024", [
             ["Xiaomi 15 Ultra", "Xiaomi 15 Ultra"], ["Xiaomi 15 Pro", "Xiaomi 15 Pro"],

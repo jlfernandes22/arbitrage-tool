@@ -9,7 +9,17 @@
 import { db } from "@/lib/db";
 import { config } from "@/lib/config";
 const FOREX_TTL_MS = config.forex.ttl_seconds * 1000;
-export async function getCnyToEurRate(): Promise<{
+/**
+ * Resolve the CNY→EUR rate: DB cache → live API → user-configured override
+ * → static fallback.
+ *
+ * `userRateOverride` is the task's RESOLVED `cny_to_eur_rate` (from config
+ * overrides set in the UI). It only kicks in when the live API is
+ * unreachable, matching the documented resolution order — but WITHOUT it the
+ * user's manual rate was dead code (the module-level `config` is the static
+ * default, not the per-task resolved config).
+ */
+export async function getCnyToEurRate(userRateOverride?: number): Promise<{
   rate: number;
   source: "cache" | "api" | "fallback";
 }> {
@@ -63,7 +73,9 @@ export async function getCnyToEurRate(): Promise<{
   // config overrides) so the user's manual rate actually takes effect when
   // the live API is unreachable. Fall back to the static `fallback_rate`
   // only if the user-configured value is missing or invalid (≤ 0).
-  const userRate = config.forex.cny_to_eur_rate;
+  const userRate = userRateOverride && userRateOverride > 0
+    ? userRateOverride
+    : config.forex.cny_to_eur_rate;
   const rate = userRate && userRate > 0 ? userRate : config.forex.fallback_rate;
   return { rate, source: "fallback" };
 }

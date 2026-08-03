@@ -10,6 +10,25 @@ import {
 } from "@/lib/reference-prices";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+// Price bounds — sane values only (in EUR); NaN/negative/huge garbage would
+// otherwise persist and corrupt every downstream profit calculation.
+const PRICE_MIN = 0;
+const PRICE_MAX = 1_000_000;
+const KEY_MAX_LEN = 120;
+
+function isValidPrices(prices: unknown): prices is {
+  new: number; excellent: number; veryGood: number; good: number; fair: number;
+} {
+  if (!prices || typeof prices !== "object" || Array.isArray(prices)) return false;
+  const p = prices as Record<string, unknown>;
+  const keys = ["new", "excellent", "veryGood", "good", "fair"];
+  return keys.every((k) => {
+    const v = p[k];
+    return typeof v === "number" && Number.isFinite(v) && v >= PRICE_MIN && v <= PRICE_MAX;
+  });
+}
+
 export async function GET() {
   try {
     const rows = await getReferencePriceRows();
@@ -45,6 +64,15 @@ export async function POST(req: NextRequest) {
           { status: 400 },
         );
       }
+      if (typeof standardKey !== "string" || standardKey.length > KEY_MAX_LEN) {
+        return NextResponse.json({ error: "standardKey is invalid" }, { status: 400 });
+      }
+      if (!isValidPrices(prices)) {
+        return NextResponse.json(
+          { error: "prices must be finite numbers between 0 and 1000000" },
+          { status: 400 },
+        );
+      }
       await updateReferencePrice(standardKey, prices);
       return NextResponse.json({ ok: true, action: "updated", standardKey });
     }
@@ -63,6 +91,16 @@ export async function POST(req: NextRequest) {
       if (!standardKey || !category || !prices) {
         return NextResponse.json(
           { error: "standardKey, category and prices are required" },
+          { status: 400 },
+        );
+      }
+      if (typeof standardKey !== "string" || standardKey.length > KEY_MAX_LEN
+        || typeof category !== "string" || category.length > 40) {
+        return NextResponse.json({ error: "standardKey/category are invalid" }, { status: 400 });
+      }
+      if (!isValidPrices(prices)) {
+        return NextResponse.json(
+          { error: "prices must be finite numbers between 0 and 1000000" },
           { status: 400 },
         );
       }
@@ -105,6 +143,19 @@ export async function POST(req: NextRequest) {
         if (!r.standardKey || !r.category || !r.prices) {
           return NextResponse.json(
             { error: `Invalid row: ${JSON.stringify(r).slice(0, 100)}` },
+            { status: 400 },
+          );
+        }
+        if (typeof r.standardKey !== "string" || r.standardKey.length > KEY_MAX_LEN
+          || typeof r.category !== "string" || r.category.length > 40) {
+          return NextResponse.json(
+            { error: `Invalid standardKey/category in row: ${JSON.stringify(r).slice(0, 100)}` },
+            { status: 400 },
+          );
+        }
+        if (!isValidPrices(r.prices)) {
+          return NextResponse.json(
+            { error: `Invalid prices in row: ${JSON.stringify(r).slice(0, 100)}` },
             { status: 400 },
           );
         }

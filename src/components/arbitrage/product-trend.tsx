@@ -49,30 +49,40 @@ export function ProductTrend({ defaultQuery, refreshKey }: { defaultQuery?: stri
   const [suggestionIndex, setSuggestionIndex] = useState(-1);
   const suggestionsCache = useRef<Map<string, Suggestion[]>>(new Map());
 
+  // Sequence counters: only the LATEST request may apply its response —
+  // a slow earlier response must not overwrite a newer product's data.
+  const trendSeqRef = useRef(0);
+  const suggestSeqRef = useRef(0);
+
   const fetchTrend = useCallback(async (q: string) => {
     if (!q.trim()) return;
+    const seq = ++trendSeqRef.current;
     setLoading(true);
     setError(null);
     try {
       const cleanQ = stripStorage(q);
       const res = await fetch(`/api/tasks/trend?query=${encodeURIComponent(cleanQ)}`);
+      if (seq !== trendSeqRef.current) return; // superseded by a newer request
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: "fetch failed" }));
         throw new Error(err.error ?? "fetch failed");
       }
       const json: TrendResponse = await res.json();
+      if (seq !== trendSeqRef.current) return;
       setData(json);
     } catch (e) {
+      if (seq !== trendSeqRef.current) return;
       const msg = e instanceof Error ? e.message : String(e);
       setError(msg);
       setData(null);
     } finally {
-      setLoading(false);
+      if (seq === trendSeqRef.current) setLoading(false);
     }
   }, []);
 
   // Fetch autocomplete suggestions as the user types
   const fetchSuggestions = useCallback(async (q: string) => {
+    const seq = ++suggestSeqRef.current;
     if (q.trim().length < 2) {
       setSuggestions([]);
       return;
@@ -85,11 +95,12 @@ export function ProductTrend({ defaultQuery, refreshKey }: { defaultQuery?: stri
     }
     try {
       const res = await fetch(`/api/tasks/suggestions?q=${encodeURIComponent(q.trim())}`);
+      if (seq !== suggestSeqRef.current) return;
       if (res.ok) {
         const json = await res.json();
         const sugs: Suggestion[] = json.suggestions || [];
         suggestionsCache.current.set(cacheKey, sugs);
-        setSuggestions(sugs);
+        if (seq === suggestSeqRef.current) setSuggestions(sugs);
       }
     } catch {
       // ignore

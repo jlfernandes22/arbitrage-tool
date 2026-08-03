@@ -35,7 +35,7 @@
     "hide_threshold": 60
   },
   "scraping": {
-    "max_listings_per_search": 50,
+    "max_listings_per_search": 100,
     "max_pages": 3,
     "jitter_min_ms": 3000,
     "jitter_max_ms": 7000,

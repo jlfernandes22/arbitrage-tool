@@ -613,22 +613,3 @@ export function normalizeListing(
   };
   return product;
 }
-// Map Chinese condition token -> European condition label for matching
-export function conditionLabel(condition: Condition): string {
-  switch (condition) {
-    case "new":
-      return "New";
-    case "open_box":
-      return "Open Box";
-    case "excellent":
-      return "Excellent";
-    case "very_good":
-      return "Very Good";
-    case "good":
-      return "Good";
-    case "fair":
-      return "Fair / Heavily Used";
-    default:
-      return "Used";
-  }
-}

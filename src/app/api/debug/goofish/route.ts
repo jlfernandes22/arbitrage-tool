@@ -50,17 +50,29 @@ export async function GET(req: NextRequest) {
     });
 
     const ctx = await browser.newContext({
+      // Windows Chrome fingerprint — required to bypass the NVIDIA/Linux
+      // overlay that Goofish shows to Linux/headless environments.
       userAgent:
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-      locale: "zh-CN",
+      locale: "en-US",
       viewport: { width: 1920, height: 1080 },
       extraHTTPHeaders: {
-        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+        // CRITICAL RESTRICTION: this scraper runs from a NON-China IP. Do NOT
+        // send Accept-Language: zh-CN — forcing Chinese while connecting from
+        // abroad creates a geo-location mismatch that triggers an immediate
+        // block. Use a locale matching the IP geolocation instead.
+        "Accept-Language": "en-US,en;q=0.9",
+        // Client hints — report Windows (not Linux) so the platform
+        // fingerprint agrees with the User-Agent.
+        "Sec-Ch-Ua": '"Chromium";v="131", "Not_A Brand";v="24", "Google Chrome";v="131"',
+        "Sec-Ch-Ua-Mobile": "?0",
+        "Sec-Ch-Ua-Platform": '"Windows"',
       },
     });
 
     await ctx.addInitScript(() => {
       Object.defineProperty(navigator, "webdriver", { get: () => undefined });
+      Object.defineProperty(navigator, "platform", { get: () => "Win32" });
     });
 
     const page = await ctx.newPage();

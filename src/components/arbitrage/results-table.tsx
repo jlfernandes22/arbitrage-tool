@@ -176,6 +176,9 @@ export const ResultsTable = forwardRef<ResultsTableHandle, ResultsTableProps>(fu
   if (prevFilterSig !== filterSig) {
     setPrevFilterSig(filterSig);
     setPage(1);
+    // The dataset changed — drop keyboard-selected row so highlight/copy
+    // actions don't silently target a different listing.
+    setActiveIdx(-1);
   }
   // Clamp page when the sorted set shrinks (e.g. after re-evaluate).
   const effectivePage = Math.min(Math.max(1, page), totalPages);
@@ -425,7 +428,7 @@ export const ResultsTable = forwardRef<ResultsTableHandle, ResultsTableProps>(fu
                                 Falls back to a neutral placeholder icon when no
                                 image is available or the URL fails to load. */}
                             <div className="relative h-11 w-11 shrink-0 overflow-hidden rounded-md border bg-muted/40">
-                              {listing.imageUrls[0] && !imgErrors[listing.id] ? (
+                              {listing.imageUrls?.[0] && !imgErrors[listing.id] ? (
                                 <img
                                   src={listing.imageUrls[0]}
                                   alt=""
@@ -524,9 +527,9 @@ export const ResultsTable = forwardRef<ResultsTableHandle, ResultsTableProps>(fu
                                     {n.storageGB >= 1024 ? `${n.storageGB / 1024}TB` : `${n.storageGB}GB`}
                                   </Badge>
                                 )}
-                                {listing.imageUrls.length > 0 && (
+                                {(listing.imageUrls?.length ?? 0) > 0 && (
                                   <span className="text-[9px] text-muted-foreground">
-                                    {listing.imageUrls.length} img
+                                    {listing.imageUrls?.length ?? 0} img
                                   </span>
                                 )}
                               </div>
@@ -707,7 +710,7 @@ export const ResultsTable = forwardRef<ResultsTableHandle, ResultsTableProps>(fu
                               Risk Score: {riskScore}/100
                               {riskDropped ? " (DROPPED)" : riskScore >= 60 ? " — High risk" : riskScore >= 40 ? " — Moderate risk" : " — Low risk"}
                             </p>
-                            {l?.scam?.reasons && Array.isArray(l.scam.reasons) && l.scam.reasons.length > 0 ? (
+                            {l?.scam?.reasons && l.scam.reasons.length > 0 ? (
                               <ul className="space-y-0.5">
                                 {l.scam.reasons.map((reason, ri) => (
                                   <li key={ri} className="flex gap-1.5 text-[10px] text-muted-foreground">

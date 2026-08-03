@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createTask, runPipeline } from "@/lib/orchestrator";
-import type { AppConfig, Category } from "@/lib/engine/types";
+import type { Category } from "@/lib/engine/types";
+import { sanitizeConfigOverrides } from "@/lib/overrides";
+import type { AppConfig } from "@/lib/engine/types";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 const VALID_CATEGORIES: Category[] = ["iphone", "macbook", "ipad", "ps5", "samsung", "applewatch", "dji", "xiaomi", "gaming"];
+
 export async function POST(req: NextRequest) {
   let body: unknown;
   try {
@@ -14,10 +17,13 @@ export async function POST(req: NextRequest) {
   const { query, category, configOverrides } = body as {
     query?: string;
     category?: string;
-    configOverrides?: Partial<AppConfig>;
+    configOverrides?: unknown;
   };
   if (!query || typeof query !== "string" || query.trim().length === 0) {
     return NextResponse.json({ error: "query is required" }, { status: 400 });
+  }
+  if (query.trim().length > 200) {
+    return NextResponse.json({ error: "query is too long (max 200 chars)" }, { status: 400 });
   }
   const cat = (category as Category) ?? "iphone";
   if (!VALID_CATEGORIES.includes(cat)) {
@@ -26,10 +32,16 @@ export async function POST(req: NextRequest) {
       { status: 400 },
     );
   }
-  const task = createTask({
+  const sanitized = sanitizeConfigOverrides(configOverrides);
+  if (!sanitized.ok) {
+    return NextResponse.json({ error: sanitized.error }, { status: 400 });
+  }
+  const task = await createTask({
     query: query.trim(),
     category: cat,
-    configOverrides,
+    // SanitizedOverrides carries partial sections — the same shape
+    // resolveConfig() merges at runtime, so the cast is safe.
+    configOverrides: sanitized.overrides as Partial<AppConfig> | undefined,
   });
   // Fire-and-forget pipeline execution
   void runPipeline(task.id).catch((err) => {

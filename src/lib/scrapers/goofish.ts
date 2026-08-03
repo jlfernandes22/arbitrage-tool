@@ -17,7 +17,9 @@ import { config } from "@/lib/config";
 import type { Category, GoofishListing } from "@/lib/engine/types";
 import { normalizeListing } from "@/lib/engine/normalizer";
 import { includesNonNegated } from "@/lib/engine/scam-detector";
+import { detectConditionFlags } from "@/lib/engine/condition-flags";
 import { createContext } from "./browser";
+import { sleep, jitter } from "./utils";
 import { chromium } from "playwright";
 export interface GoofishScrapeResult {
   listings: GoofishListing[];
@@ -37,187 +39,93 @@ export function buildGoofishSearchUrl(query: string): string {
   // and returns the same Chinese-language listings.
   return `${config.scraping.goofish_search_url}${encodeURIComponent(query)}&spm=a21ybx.search.searchInput.0`;
 }
+// ── Anti-Bot: Windows UA rotation ─────────────────────────────────────
+// Goofish's Baxia anti-bot can flag a user agent after detecting
+// automation (it then shows the SMS-login modal with a NoCaptcha slider
+// on every listing page). When that happens we rotate to a FRESH Windows
+// Chrome UA from this pool and retry — a new UA gets a clean session.
+// Sec-Ch-Ua must match the UA's Chrome version.
+const GOOFISH_UA_POOL = [
+  {
+    userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    secChUa: '"Chromium";v="131", "Not_A Brand";v="24", "Google Chrome";v="131"',
+  },
+  {
+    userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36",
+    secChUa: '"Chromium";v="129", "Not_A Brand";v="24", "Google Chrome";v="129"',
+  },
+  {
+    userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36",
+    secChUa: '"Chromium";v="127", "Not_A Brand";v="24", "Google Chrome";v="127"',
+  },
+];
+
 /**
- * Translate an English search query to Chinese for Goofish (闲鱼).
- * Chinese sellers write listings in Chinese, so English queries like
- * "iPhone 15 Pro" should become "苹果15 Pro" and "Samsung Galaxy S26 Ultra"
- * should become "三星 Galaxy S26 Ultra".
+ * Create a Goofish browser context with the given UA-pool index. Always a
+ * Windows Chrome fingerprint (bypasses the NVIDIA/Linux overlay) with an
+ * en-US locale matching a non-China IP (never Accept-Language: zh-CN —
+ * that geo-mismatch triggers an immediate block).
  */
-function translateQueryToChinese(query: string): string {
-  let q = query.trim();
-  // ── COMPREHENSIVE CHINESE TRANSLATION TABLE ──
-  // Every brand/product in the catalog that has a Chinese name used by
-  // Goofish (闲鱼) sellers. Products are translated to Chinese so the
-  // search returns real results (Chinese sellers list in Chinese).
-  //
-  // DOUBLE-TRANSLATION PREVENTION: Product-specific translations that
-  // already include the brand's Chinese name (e.g. "Osmo Pocket" → "大疆口袋云台")
-  // are applied FIRST. Then the generic brand replacement (e.g. "DJI" → "大疆")
-  // only runs if the Chinese brand name isn't already in the string.
+async function createGoofishContext(
+  browser: import("playwright").Browser,
+  uaIndex: number,
+): Promise<import("playwright").BrowserContext> {
+  const ua = GOOFISH_UA_POOL[uaIndex % GOOFISH_UA_POOL.length];
+  const ctx = await browser.newContext({
+    userAgent: ua.userAgent,
+    locale: "en-US",
+    viewport: { width: 1920, height: 1080 },
+    extraHTTPHeaders: {
+      "Accept-Language": "en-US,en;q=0.9",
+      "Sec-Ch-Ua": ua.secChUa,
+      "Sec-Ch-Ua-Mobile": "?0",
+      "Sec-Ch-Ua-Platform": '"Windows"',
+    },
+  });
+  // Only remove webdriver flag — don't use the full stealth script
+  // (it overrides navigator.languages which can cause detection).
+  // navigator.platform is spoofed to Win32 so it agrees with the Windows
+  // User-Agent (a Linux value would contradict it and could be detected).
+  await ctx.addInitScript(() => {
+    Object.defineProperty(navigator, "webdriver", { get: () => undefined });
+    Object.defineProperty(navigator, "platform", { get: () => "Win32" });
+  });
+  return ctx;
+}
 
-  // ── Sony — specific products FIRST ──
-  q = q.replace(/PlayStation\s*5/gi, "PS5");
-  q = q.replace(/PlayStation/gi, "PS");
-  q = q.replace(/\bDualSense\b/gi, "索尼手柄");
-  q = q.replace(/\bDualShock\b/gi, "索尼手柄");
-  q = q.replace(/\bWH-1000XM(\d+)/gi, "索尼降噪耳机XM$1");
-  q = q.replace(/\bWF-1000XM(\d+)/gi, "索尼降噪豆XM$1");
-  q = q.replace(/\bWF-C700N\b/gi, "索尼降噪豆C700N");
-  // Sony brand: replace with 索尼, or remove if 索尼 already present
-  q = q.includes("索尼") ? q.replace(/\bSony\s*/gi, "") : q.replace(/\bSony\b/gi, "索尼");
-
-  // ── DJI — specific products FIRST ──
-  q = q.replace(/\bDJI Mic 2\b/gi, "大疆麦克风2");
-  q = q.replace(/\bDJI Mic\b/gi, "大疆麦克风");
-  q = q.replace(/\bOsmo Pocket\b/gi, "大疆口袋云台");
-  q = q.replace(/\bOsmo Action\b/gi, "大疆运动相机");
-  q = q.replace(/\bOsmo Mobile\b/gi, "大疆灵眸");
-  q = q.replace(/\bDJI RS\b/gi, "大疆如影");
-  q = q.replace(/\bMavic\b/gi, "大疆Mavic");
-  q = q.replace(/\bAvata\b/gi, "大疆Avata");
-  q = q.replace(/\bInspire\b/gi, "大疆悟");
-  // DJI brand: replace with 大疆, or remove if 大疆 already present
-  q = q.includes("大疆") ? q.replace(/\bDJI\s*/gi, "") : q.replace(/\bDJI\b/gi, "大疆");
-
-  // ── Lenovo — specific product FIRST ──
-  q = q.replace(/\bLegion Go\b/gi, "联想拯救者掌机");
-  // Lenovo brand: replace with 联想, or remove if 联想 already present
-  q = q.includes("联想") ? q.replace(/\bLenovo\s*/gi, "") : q.replace(/\bLenovo\b/gi, "联想");
-
-  // ── ASUS / ROG — specific products FIRST ──
-  q = q.replace(/\bROG Ally\b/gi, "华硕掌机");
-  q = q.replace(/\bROG Strix\b/gi, "华硕ROG Strix");
-  q = q.replace(/\bROG Zephyrus\b/gi, "华硕ROG Zephyrus");
-  // ROG generic: replace standalone "ROG" (not part of 华硕ROG) with 华硕ROG,
-  // or skip if 华硕ROG or 华硕掌机 already present
-  if (!q.includes("华硕ROG") && !q.includes("华硕掌机")) {
-    q = q.replace(/\bROG\b/gi, "华硕ROG");
-  }
-  // Remove any remaining standalone "ROG " (leftover from product-specific translations)
-  q = q.replace(/\bROG\s+(?!Strix|Zephyrus)/gi, "");
-  // ASUS brand: replace with 华硕, or remove if 华硕 already present
-  q = q.includes("华硕") ? q.replace(/\bASUS\s*/gi, "") : q.replace(/\bASUS\b/gi, "华硕");
-  // TUF: only add 华硕 if not already present
-  q = q.includes("华硕") ? q.replace(/\bTUF\b/gi, "TUF") : q.replace(/\bTUF\b/gi, "华硕TUF");
-
-  // ── Apple ──
-  q = q.replace(/\bApple Watch\b/gi, "苹果手表");
-  q = q.replace(/\biPhone\b/gi, "苹果");
-  q = q.replace(/\bMacBook\b/gi, "苹果笔记本");
-  q = q.replace(/\biPad\b/gi, "苹果平板");
-  q = q.replace(/\bAirPods\b/gi, "苹果耳机");
-
-  // ── Samsung — specific products FIRST ──
-  q = q.replace(/\bGalaxy Tab\b/gi, "三星平板");
-  q = q.replace(/\bGalaxy Book\b/gi, "三星笔记本");
-  q = q.replace(/\bGalaxy Buds\b/gi, "三星耳机");
-  // Samsung brand: replace with 三星, or remove if 三星 already present
-  q = q.includes("三星") ? q.replace(/\bSamsung\s*/gi, "") : q.replace(/\bSamsung\b/gi, "三星");
-
-  // ── Xiaomi — specific products FIRST ──
-  q = q.replace(/\bMi Band\b/gi, "小米手环");
-  q = q.replace(/\bXiaomi Watch\b/gi, "小米手表");
-  q = q.replace(/\bXiaomi Pad\b/gi, "小米平板");
-  q = q.replace(/\bXiaomi Buds\b/gi, "小米耳机");
-  q = q.replace(/\bMi Smart Desk Lamp\b/gi, "小米台灯");
-  q = q.replace(/\bMi Desk Lamp\b/gi, "小米台灯");
-  q = q.replace(/\bMi Bedside Lamp\b/gi, "小米床头灯");
-  q = q.replace(/\bMi Smart LED Bulb\b/gi, "小米灯泡");
-  q = q.replace(/\bMi Air Purifier\b/gi, "小米空气净化器");
-  q = q.replace(/\bMi Smart Humidifier\b/gi, "小米加湿器");
-  q = q.replace(/\bMi Smart Kettle\b/gi, "小米电水壶");
-  q = q.replace(/\bYeelight\b/gi, "易来灯");
-  q = q.replace(/\bMijia\b/gi, "米家");
-  // Xiaomi brand: replace with 小米, or remove if 小米 already present
-  q = q.includes("小米") ? q.replace(/\bXiaomi\s*/gi, "") : q.replace(/\bXiaomi\b/gi, "小米");
-  q = q.replace(/\bRedmi Book\b/gi, "红米笔记本");
-  q = q.replace(/\bRedmi Pad\b/gi, "红米平板");
-  q = q.replace(/\bRedmi Buds\b/gi, "红米耳机");
-  q = q.replace(/\bRedmi\b/gi, "红米");
-
-  // ── OnePlus ──
-  q = q.replace(/\bOnePlus\b/gi, "一加");
-
-  // ── OPPO ──
-  // OPPO stays as-is (sellers use "OPPO")
-
-  // ── Honor ──
-  q = q.replace(/\bHonor\b/gi, "荣耀");
-
-  // ── Realme ──
-  q = q.replace(/\bRealme\b/gi, "真我");
-
-  // ── Vivo ──
-  q = q.replace(/\bVivo\b/gi, "vivo");
-  // iQOO stays as-is
-
-  // ── Motorola ──
-  q = q.replace(/\bRazr\b/gi, "刀锋");
-  q = q.replace(/\bMotorola\b/gi, "摩托罗拉");
-  q = q.replace(/\bMoto\b/gi, "摩托罗拉");
-
-  // ── Nintendo ──
-  q = q.replace(/\bNintendo\b/gi, "任天堂");
-
-  // ── Steam Deck — sellers use "Steam Deck" as-is ──
-
-  // ── Logitech ──
-  q = q.replace(/\bLogitech\b/gi, "罗技");
-
-  // ── Razer — specific products FIRST ──
-  q = q.replace(/\bDeathAdder\b/gi, "炼狱蝰蛇");
-  q = q.replace(/\bBlackWidow\b/gi, "黑寡妇");
-  q = q.replace(/\bViper\b/gi, "毒蝰");
-  q = q.replace(/\bBasilisk\b/gi, "巴塞利斯蛇");
-  q = q.replace(/\bHuntsman\b/gi, "猎魂光蛛");
-  q = q.replace(/\bBlackShark\b/gi, "黑鲨");
-  q = q.replace(/\bKraken\b/gi, "北海巨妖");
-  q = q.replace(/\bRazer\b/gi, "雷蛇");
-
-  // ── Corsair ──
-  q = q.replace(/\bCorsair\b/gi, "海盗船");
-
-  // ── Camera brands ──
-  q = q.replace(/\bCanon\b/gi, "佳能");
-  q = q.replace(/\bNikon\b/gi, "尼康");
-  q = q.replace(/\bFujifilm\b/gi, "富士");
-  q = q.replace(/\bFuji\b/gi, "富士");
-
-  // ── Microphone brands ──
-  q = q.replace(/\bShure\b/gi, "舒尔");
-  q = q.replace(/\bRode\b/gi, "罗德");
-
-  // ── Speaker / audio brands ──
-  // JBL → stays as-is (sellers use "JBL")
-  // Bose → stays as-is (sellers use "Bose")
-  // Sonos → stays as-is (sellers use "Sonos")
-
-  // ── Robot vacuums ──
-  q = q.replace(/\bRoborock\b/gi, "石头");
-  q = q.replace(/\bEcovacs\b/gi, "科沃斯");
-  q = q.replace(/\bDeebot\b/gi, "地宝");
-
-  // ── Dyson — specific products FIRST ──
-  q = q.replace(/\bAirwrap\b/gi, "戴森美发棒");
-  q = q.replace(/\bSupersonic\b/gi, "戴森吹风机");
-  q = q.replace(/\bCorrale\b/gi, "戴森卷发棒");
-  q = q.replace(/\bAirstrait\b/gi, "戴森直发器");
-  // Dyson brand: replace with 戴森, or remove if 戴森 already present
-  q = q.includes("戴森") ? q.replace(/\bDyson\s*/gi, "") : q.replace(/\bDyson\b/gi, "戴森");
-
-  // ── Projectors ──
-  q = q.replace(/\bXGIMI\b/gi, "极米");
-  q = q.replace(/\bAnker\b/gi, "安克");
-  // Nebula → stays as-is
-
-  // ── GoPro → sellers use "GoPro" as-is ──
-  // ── Insta360 ──
-  q = q.replace(/\bInsta360\b/gi, "影石");
-
-  // ── Vitamix ──
-  q = q.replace(/\bVitamix\b/gi, "维他密斯");
-
-  return q;
+/**
+ * Surgically remove Goofish's login / Baxia overlays.
+ *
+ * CRITICAL: NEVER click the modal's close (X) button — observed behavior:
+ * clicking X makes the listing fail to load. el.remove() with surgical
+ * selectors only, which unblocks the content underneath.
+ *
+ * Covers the old .loginCon/.login-modal variants AND the new SMS-login
+ * modal (<div id="login" class="... login-view-sms baxia">…</div> with the
+ * NoCaptcha slider) that appears ~10-15s after opening a listing.
+ */
+async function removeGoofishOverlays(page: import("playwright").Page): Promise<void> {
+  await page.evaluate(() => {
+    const overlaySelectors = [
+      '[class*="loginCon"]',            // old login container
+      '[class*="login-modal"]',         // old login modal
+      '#login',                         // SMS-login modal (login-view-sms baxia)
+      '[class*="login-view-sms"]',
+      '[class*="baxia"]',               // Baxia captcha wrapper inside the modal
+      '[class*="keep-login"]',          // "keep login" confirmation overlay
+    ];
+    overlaySelectors.forEach((sel) => {
+      document.querySelectorAll(sel).forEach((el) => el.remove());
+    });
+    // Passport/login iframes block interaction
+    document
+      .querySelectorAll('iframe[src*="passport"], iframe[src*="login"]')
+      .forEach((el) => el.remove());
+    // Restore body scroll
+    document.body.style.overflow = "auto";
+    document.body.style.position = "static";
+    document.documentElement.style.overflow = "auto";
+  }).catch(() => {});
 }
 /**
  * Get a sensible minimum price (CNY) for the Goofish price filter.
@@ -234,52 +142,42 @@ function getMinPriceCny(category: Category): number {
     default: return 500;
   }
 }
-function jitter(minMs: number, maxMs: number): number {
-  return Math.floor(Math.random() * (maxMs - minMs)) + minMs;
-}
-function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
-}
 /**
- * Result of a live fetch attempt. Distinguishes "blocked/failed" from
- * "succeeded with HTML" so the caller can log the exact reason mock data
- * was (or wasn't) used.
+ * Filter out listings that aren't real products: phone boxes, rentals,
+ * installments, unlock services, model phones, commission scams and
+ * non-electronics. These pollute the arbitrage results with useless entries.
+ *
+ * The box/packaging tokens are matched negation-aware via
+ * `includesNonNegated` so legitimate listings like "带包装" (with original
+ * packaging) or "有盒子" (has the box) are NOT rejected — only bare
+ * 包装/盒子 tokens (or explicit box-only phrases like 只卖包装) are junk.
  */
-interface LiveFetchResult {
-  html: string | null;
-  ok: boolean;
-  status?: number;
-  error?: string;
-}
-/**
- * Attempt a real HTTP fetch of the Goofish search page HTML.
- * Returns a LiveFetchResult so the caller knows exactly what happened.
- */
-async function attemptRealFetch(query: string): Promise<LiveFetchResult> {
-  const url = buildGoofishSearchUrl(query);
-  try {
-    const res = await fetch(url, {
-      signal: AbortSignal.timeout(8000),
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
-        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-        Referer: "https://www.goofish.com/",
-      },
-    });
-    if (res.ok) {
-      const html = await res.text();
-      if (html && html.length > 500) {
-        return { html, ok: true, status: res.status };
-      }
-      return { html: null, ok: false, status: res.status, error: `response too short (${html?.length ?? 0} bytes)` };
-    }
-    return { html: null, ok: false, status: res.status, error: `HTTP ${res.status}` };
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    return { html: null, ok: false, error: msg };
+function isJunkListing(title: string): boolean {
+  const hasBoxQualifier = /[带有含].{0,3}?(?:包装|盒子)/.test(title);
+  if (!hasBoxQualifier) {
+    // Phone boxes / packaging only — catch all variants
+    if (/手机盒|包装盒|原装盒子|只是盒子|是盒子|只卖包装|空盒|纸盒|only.*box|空壳/i.test(title)) return true;
+    // Bare 包装/盒子 tokens — negation-aware, so "无包装" (no packaging)
+    // is not junk either.
+    if (includesNonNegated(title, "包装") || includesNonNegated(title, "盒子")) return true;
   }
+  // Rentals / leases
+  if (/出租|租赁|租借|以租代购|免押金出租|短租/i.test(title)) return true;
+  // Installment / financing plans
+  if (/分期|首付|月供|0首付|可分|可租/i.test(title)) return true;
+  // Unlock / bypass services
+  if (/解锁|绕id|绕开|黑解|官解/i.test(title)) return true;
+  // Screenshots / digital services
+  if (/截图|灵动岛|代截/i.test(title)) return true;
+  // Model phones (non-functional display units)
+  if (/模型机|模型/i.test(title)) return true;
+  // Commission / task scams
+  if (/垫付|佣金|接单|过单/i.test(title)) return true;
+  // Non-electronics (tissue paper, food, etc. that slip through)
+  if (/抽纸|纸巾|零食|水果|花盆|衣服|鞋|包/i.test(title)) return true;
+  // Listing has "回馈活动" (giveaway/promotional event) — not a real listing
+  if (/回馈活动|抽奖|中奖|免费送/i.test(title)) return true;
+  return false;
 }
 /**
  * Parse Goofish search-result HTML into listings.
@@ -364,38 +262,31 @@ async function scrapeGoofishLive(
       "--disable-dev-shm-usage",
     ],
   });
-  const ctx = await freshBrowser.newContext({
-    userAgent:
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-    locale: "zh-CN",
-    viewport: { width: 1920, height: 1080 },
-    extraHTTPHeaders: {
-      "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-    },
-  });
-  // Only remove webdriver flag — don't use the full stealth script
-  // (it overrides navigator.languages which can cause detection)
-  await ctx.addInitScript(() => {
-    Object.defineProperty(navigator, "webdriver", { get: () => undefined });
-  });
 
-  const MAX_RETRIES = 2;
+  const MAX_RETRIES = 3;
   // Scale the overall timeout with the number of pages requested.
   // Base 90s for initial page load + modal dismissal + first extraction,
-  // then 20s per additional page for scroll-to-load cycles.
-  // Floor: 90s, Ceiling: 360s (6 min).
-  const OVERALL_TIMEOUT_MS = Math.max(90000, Math.min(360000, 90000 + 20000 * maxPages));
+  // then 40s per additional page for the exhaustive scroll-load + next-page
+  // navigation cycles (the per-page load is now much more thorough).
+  // Floor: 120s, Ceiling: 600s (10 min).
+  const OVERALL_TIMEOUT_MS = Math.max(120000, Math.min(600000, 90000 + 40000 * maxPages));
   const startTime = Date.now();
   let lastStatus = "";
 
+  // The context is created PER ATTEMPT with a rotating UA: if Baxia flags
+  // one UA (login modal everywhere), the next attempt gets a fresh one.
+  let ctx: import("playwright").BrowserContext | null = null;
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     // Overall timeout check — bail out if we've been scraping too long
     if (Date.now() - startTime > OVERALL_TIMEOUT_MS) {
       lastStatus = `LIVE FETCH TIMEOUT: exceeded ${OVERALL_TIMEOUT_MS / 1000}s overall limit after ${attempt - 1} attempts. ${lastStatus}`;
       break;
     }
-    let page: Awaited<ReturnType<typeof ctx.newPage>> | null = null;
+    if (ctx) await ctx.close().catch(() => {});
+    ctx = await createGoofishContext(freshBrowser, attempt - 1);
+    let page: import("playwright").Page | null = null;
     try {
+      if (!ctx) break;
       page = await ctx.newPage();
       const url = buildGoofishSearchUrl(query);
       await page.goto(url, { waitUntil: "domcontentloaded", timeout: 20000 });
@@ -406,6 +297,7 @@ async function scrapeGoofishLive(
     //   - .ant-modal-mask (Ant Design modal mask, z-index 1000)
     //   - .ant-modal-wrap.login-modal-wrap--* (modal wrapper, z-index 1000)
     //   - .baxia-dialog (CAPTCHA/verification dialog, z-index 2147483647)
+    //   - #login.login-view-sms.baxia (SMS-login modal + NoCaptcha slider)
     //   - Various fixed-position overlays with high z-index
     // These block all interaction and prevent search results from loading.
     // ── MODAL DISMISSAL — SURGICAL REMOVE ───────────────────────────
@@ -419,52 +311,12 @@ async function scrapeGoofishLive(
     //     removes ONLY the login modal, not listing content. This is the
     //     approach that WORKS — 30 listings extracted, screenshots show
     //     real iPhones. GOOD.
+    //   - NEVER click the modal's close (X) button — that makes the
+    //     listing fail to load (observed with the Baxia SMS-login modal).
     try {
       // Wait for the modal to render
       await page.waitForTimeout(1500);
-
-      // Try clicking the close button first (most natural)
-      try {
-        const closeSelectors = [
-          '[class*="loginCon"] [class*="close"]',
-          '[class*="login-modal"] [class*="close"]',
-          '.ant-modal-close',
-          '[class*="ant-modal-close"]',
-        ];
-        for (const sel of closeSelectors) {
-          const btn = page.locator(sel).first();
-          if ((await btn.count()) > 0) {
-            await btn.click({ timeout: 2000 }).catch(() => {});
-            await page.waitForTimeout(1000);
-            break;
-          }
-        }
-      } catch {
-        // close button click failed
-      }
-
-      // SURGICAL remove — ONLY specific login modal elements
-      // CRITICAL: Do NOT remove [class*="ant-modal-wrap"] — it's a huge
-      // container that includes 126KB of page content. Only remove the
-      // specific login container + mask + iframes.
-      await page.evaluate(() => {
-        // Remove ONLY these specific elements:
-        const modalSelectors = [
-          '[class*="loginCon"]',           // login container
-          '[class*="login-modal"]',         // login modal
-        ];
-        modalSelectors.forEach((sel) => {
-          document.querySelectorAll(sel).forEach((el) => el.remove());
-        });
-        // Remove passport/login iframes (they block interaction)
-        document
-          .querySelectorAll('iframe[src*="passport"], iframe[src*="login"]')
-          .forEach((el) => el.remove());
-        // Restore body scroll
-        document.body.style.overflow = "auto";
-        document.body.style.position = "static";
-        document.documentElement.style.overflow = "auto";
-      });
+      await removeGoofishOverlays(page);
       await page.waitForTimeout(500);
     } catch {
       // Overlays may not have appeared — proceed
@@ -483,27 +335,14 @@ async function scrapeGoofishLive(
       await page.waitForTimeout(3000);
     }
 
-    // Scroll down incrementally to trigger lazy-loading of ALL listing cards.
-    // Goofish uses virtualized rendering — cards load as you scroll.
-    // We scroll in steps and wait for the card count to stabilize.
-    // Increased to 20 attempts with larger scrolls to load more listings
-    // on the initial page before paginating.
-    let prevCount = 0;
-    let stableCount = 0;
-    for (let scrollAttempt = 0; scrollAttempt < 20; scrollAttempt++) {
-      const currentCount = await page.locator('[class*="main-title"]').count();
-      if (currentCount === prevCount) {
-        stableCount++;
-        // If count hasn't changed for 3 consecutive scrolls, all cards are loaded
-        if (stableCount >= 3) break;
-      } else {
-        stableCount = 0;
-      }
-      prevCount = currentCount;
-      // Scroll by a larger amount (1500px) to trigger the infinite scroll
-      // watcher more aggressively
+    // Prime the list: scroll down a few steps so the first lazy-load batch
+    // renders. The exhaustive per-page loop below does the FULL loading
+    // (scrolling + extracting + pagination) — this is just a head start so
+    // the price-filter row and the first cards are in the DOM.
+    for (let primeStep = 0; primeStep < 4; primeStep++) {
+      if (Date.now() - startTime > OVERALL_TIMEOUT_MS) break;
       await page.evaluate(() => window.scrollBy(0, 1500));
-      await page.waitForTimeout(1200);
+      await page.waitForTimeout(1000);
     }
     // Scroll back to top so the extraction sees the first page of results
     await page.evaluate(() => window.scrollTo(0, 0));
@@ -546,23 +385,6 @@ async function scrapeGoofishLive(
         // price filter not available or failed — proceed with unfiltered results
       }
     }
-    // ─── PAGINATION + EXTRACTION LOOP ───────────────────────────
-    // Goofish uses a "Next Page" pagination button (NOT infinite scroll).
-    // The button HTML is:
-    //   <button class="search-pagination-arrow-container--lt2kCP6J">
-    //     <div class="...search-pagination-arrow-right--CKU78u4z"></div>
-    //   </button>
-    // Strategy per page:
-    //   1. Extract ALL listings currently in the DOM
-    //   2. If not the last page, click the next-page button (if present & enabled)
-    //   3. Wait for the new listings to render (wait for main-title count to change)
-    //   4. Fallback: if no next button, scroll to trigger lazy-load
-    //   5. Deduplicate by title across pages
-    const allRawListings: Array<{
-      title: string; priceText: string; description: string;
-      imageUrl: string; href: string; location: string;
-    }> = [];
-    const seenTitles = new Set<string>();
     // Helper: extract all listings currently rendered in the DOM.
     // Uses linkEl.href (resolved absolute URL) instead of getAttribute so
     // relative paths like "/item?id=..." become "https://www.goofish.com/item?id=...".
@@ -575,7 +397,11 @@ async function scrapeGoofishLive(
       // "page is possibly null" because the outer `let page` is nullable).
       const activePage = page;
       if (!activePage) return [];
-      return await activePage.evaluate(() => {
+      // Category-specific minimum realistic price (e.g. MacBooks never
+      // below ¥2000) — computed in Node and passed into the browser
+      // context, since the page evaluate can't access Node imports.
+      const categoryMinPriceCny = getMinPriceCny(category);
+      return await activePage.evaluate((minRealisticPrice) => {
         const results: Array<{
           title: string; priceText: string; description: string;
           imageUrl: string; href: string; location: string;
@@ -652,49 +478,6 @@ async function scrapeGoofishLive(
           return parsePriceText(fullText);
         };
 
-        // ── FIND THE BEST PRICE ELEMENT ───────────────────────────────
-        // Only use the SPECIFIC Goofish price class (row3-wrap-price).
-        // Do NOT fall back to broad [class*='price'] — it matches shipping
-        // fees, deposit badges, and other noise that produces wrong prices.
-        const findBestPrice = (card: HTMLElement): string | null => {
-          // Try the SPECIFIC Goofish price class (most reliable)
-          const primaryEls = card.querySelectorAll("[class*='row3-wrap-price']");
-          for (const el of primaryEls) {
-            const price = parsePriceFromEl(el);
-            // Reject prices < ¥50 (shipping/deposit noise) and > ¥100000 (concatenation bug)
-            if (price && parseFloat(price) >= 50 && parseFloat(price) <= 100000) return price;
-          }
-          // No fallback to [class*='price'] — it causes wrong prices
-          return null;
-        };
-
-        // ── FILTER OUT NON-PHONE LISTINGS ─────────────────────────────
-        // Reject listings that are selling phone BOXES (手机盒/包装盒),
-        // rentals (出租/租赁/租借), installments (分期/首付), unlock services
-        // (解锁/绕ID), or other non-product listings. These pollute the
-        // arbitrage results with useless entries.
-        const isJunkListing = (title: string): boolean => {
-          // Phone boxes / packaging only — catch all variants
-          if (/手机盒|包装盒|原装盒子|只是盒子|是盒子|只卖包装|空盒|纸盒|包装|盒子|only.*box|空壳/i.test(title)) return true;
-          // Rentals / leases
-          if (/出租|租赁|租借|以租代购|免押金出租|短租/i.test(title)) return true;
-          // Installment / financing plans
-          if (/分期|首付|月供|0首付|可分|可租/i.test(title)) return true;
-          // Unlock / bypass services
-          if (/解锁|绕id|绕开|黑解|官解/i.test(title)) return true;
-          // Screenshots / digital services
-          if (/截图|灵动岛|代截/i.test(title)) return true;
-          // Model phones (non-functional display units)
-          if (/模型机|模型/i.test(title)) return true;
-          // Commission / task scams
-          if (/垫付|佣金|接单|过单/i.test(title)) return true;
-          // Non-electronics (tissue paper, food, etc. that slip through)
-          if (/抽纸|纸巾|零食|水果|花盆|衣服|鞋|包/i.test(title)) return true;
-          // Listing has "回馈活动" (giveaway/promotional event) — not a real listing
-          if (/回馈活动|抽奖|中奖|免费送/i.test(title)) return true;
-          return false;
-        };
-
         // ── DETECT "NO RESULTS" PAGE ──────────────────────────────────
         // When Goofish's search is blocked by Baxia CAPTCHA or returns no
         // results, it shows a "猜你喜欢" (Guess You Like) section with
@@ -725,10 +508,11 @@ async function scrapeGoofishLive(
         }
 
         // ── PRICE SANITY CHECK ────────────────────────────────────────
-        // For iPhone/MacBook/iPad/PS5 categories, real prices are always
-        // > ¥500. If a price is < ¥500, it's likely a recommended product
-        // (fruit juice ¥26, flower pots ¥5, etc.) that slipped through.
-        const MIN_REALISTIC_PRICE = 500; // ¥500 — anything less is not a real iPhone/MacBook/etc.
+        // Real prices in this category are always above the category minimum
+        // (¥500 for iPhones, ¥2000 for MacBooks, …). If a price is below it,
+        // it's likely a recommended product (fruit juice ¥26, flower pots ¥5,
+        // etc.) that slipped through.
+        const MIN_REALISTIC_PRICE = minRealisticPrice;
 
         // ── POSITIONAL TITLE↔PRICE MATCHING ───────────────────────────
         // CRITICAL FIX: Goofish renders all listing cards under a shared
@@ -749,23 +533,48 @@ async function scrapeGoofishLive(
           return p;
         });
 
-        // If the counts don't match, fall back to the walk-up approach for
-        // each title. But if they DO match (the common case), positional is
-        // 100% accurate.
-        const usePositional = titleEls.length === parsedPrices.filter(p => p !== null).length
+        // Positional pairing is enabled when the RAW element counts match —
+        // a single card with an unparseable price no longer disables it for
+        // every listing (previously that forced the fragile walk-up for all).
+        const usePositional = titleEls.length === priceEls.length
           && titleEls.length > 0;
+
+        // Per-title fallback: walk up from the title to the SMALLEST ancestor
+        // containing exactly ONE title and ONE price element — that ancestor
+        // is the listing card, so the price is guaranteed to be this title's.
+        const findPriceForTitle = (titleEl: Element): string | null => {
+          let el: Element | null = titleEl;
+          for (let j = 0; j < 6; j++) {
+            el = el.parentElement;
+            if (!el) return null;
+            const tCount = el.querySelectorAll("[class*='main-title']").length;
+            const pCount = el.querySelectorAll("[class*='row3-wrap-price']").length;
+            if (tCount === 1 && pCount === 1) {
+              const priceEl = el.querySelector("[class*='row3-wrap-price']");
+              const p = priceEl ? parsePriceFromEl(priceEl) : null;
+              if (p) {
+                const n = parseFloat(p);
+                if (n >= 50 && n <= 100000) return p;
+              }
+              return null;
+            }
+            // We walked past the card into a container with multiple cards
+            // — no single-card price for this title.
+            if (tCount > 1 && pCount > 0) return null;
+          }
+          return null;
+        };
 
         titleEls.forEach((titleEl, idx) => {
           const title = titleEl.textContent?.trim()?.substring(0, 120) || "";
-          // FILTER: skip junk listings
-          if (isJunkListing(title)) return;
 
           let priceText: string | null = null;
           let card: HTMLElement | null = null;
 
           if (usePositional) {
-            // Positional: title[idx] → price[idx]
-            priceText = parsedPrices[idx];
+            // Positional: title[idx] → price[idx]. If that card's price
+            // failed to parse, fall back to the per-card lookup.
+            priceText = parsedPrices[idx] ?? findPriceForTitle(titleEl);
             if (!priceText) return;
             // Find the card container for description/image — walk up a
             // few levels to get the card text, but DON'T use it for price.
@@ -775,15 +584,15 @@ async function scrapeGoofishLive(
               if (!card) break;
             }
           } else {
-            // Fallback: walk up to find nearest price (original approach)
+            // Counts mismatched (virtualized list mid-hydration) — locate
+            // each title's price by its own card ancestor.
             card = titleEl as HTMLElement;
-            for (let j = 0; j < 5; j++) {
-              card = card?.parentElement as HTMLElement;
-              if (!card) return;
-              priceText = findBestPrice(card);
-              if (priceText) break;
+            for (let j = 0; j < 3; j++) {
+              card = card?.parentElement;
+              if (!card) break;
             }
-            if (!priceText || !card) return;
+            priceText = findPriceForTitle(titleEl);
+            if (!priceText) return;
           }
 
           if (!priceText) return;
@@ -817,104 +626,150 @@ async function scrapeGoofishLive(
           });
         });
         return results;
-      });
+      }, categoryMinPriceCny);
     };
-    for (let pageNum = 1; pageNum <= maxPages; pageNum++) {
-      // 1) Extract listings on the current page — with a 15s timeout so
-      //    a hung evaluate() can't block the whole scraper indefinitely.
-      let pageListings: Awaited<ReturnType<typeof extractListings>>;
+    // ─── PAGINATION + EXTRACTION LOOP ───────────────────────────────
+    // Strategy per page (verified against Goofish's DOM):
+    //   1. EXHAUSTIVELY load the current page: Goofish lazy-loads cards as
+    //      you scroll, and its list is VIRTUALIZED — offscreen cards are
+    //      removed from the DOM. So a single end-of-page extraction only
+    //      sees whatever happens to be rendered at that moment. Instead we
+    //      scroll down one viewport at a time and extract after EVERY step,
+    //      accumulating unique titles.
+    //   2. Only once the current page stops yielding new listings do we
+    //      move to the NEXT page by clicking the pagination arrow button
+    //      (button[class*='search-pagination-arrow'] with the right arrow).
+    //   3. Fallback: if no next-page button exists, keep scrolling (some
+    //      Goofish variants use pure infinite scroll).
+    //   4. Deduplicate by title across pages.
+    const allRawListings: Array<{
+      title: string; priceText: string; description: string;
+      imageUrl: string; href: string; location: string;
+    }> = [];
+    const seenTitles = new Set<string>();
+    const MAX_SCROLL_ROUNDS = 24; // per page
+    const STABLE_ROUNDS_BEFORE_END = 5; // ~10s of no new listings → end of page
+    // Extract everything currently rendered, with a 15s timeout so a hung
+    // evaluate() can't block the whole scraper indefinitely.
+    const extractCurrentDom = async (): Promise<Awaited<ReturnType<typeof extractListings>>> => {
+      return Promise.race([
+        extractListings(),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("extractListings timeout (15s)")), 15000),
+        ),
+      ]);
+    };
+    // Click the "next page" arrow (right-pointing) if present. Returns true
+    // only when the click succeeded AND the page actually changed.
+    const clickNextPage = async (): Promise<boolean> => {
+      // Capture the nullable `page` in a local const so TypeScript can prove
+      // non-nullability inside the closure (same pattern as extractListings).
+      const activePage = page;
+      if (!activePage) return false;
       try {
-        pageListings = await Promise.race([
-          extractListings(),
-          new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error("extractListings timeout (15s)")), 15000),
-          ),
-        ]);
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        lastStatus = `LIVE FETCH FAILED: extraction error on page ${pageNum}: ${msg}`;
-        break;
-      }
-      // Check if the page returned "no results" (showing recommendations instead)
-      const isNoResultsPage = (pageListings as any).__noResultsPage === true;
-      if (isNoResultsPage) {
-        // Goofish returned a "no results" page with unrelated recommendations.
-        // This happens when Baxia CAPTCHA blocks the search query.
-        // Don't extract any listings — return empty with a clear warning.
-        // CRITICAL: close the browser context + browser before returning.
-        // The `ctx` and `freshBrowser` were created OUTSIDE the retry loop
-        // (lines ~348-365); without this cleanup every "no results" page
-        // would leak a full Chromium process, eventually exhausting file
-        // descriptors and memory.
-        if (page) await page.close().catch(() => {});
-        await ctx.close().catch(() => {});
-        await freshBrowser.close().catch(() => {});
-        return {
-          listings: [],
-          status: `LIVE OK (Playwright, 0 listings) | WARNING: Goofish returned "no results" page (showing recommendations). Baxia CAPTCHA likely blocked the search. Try again later or use Manual Paste.`,
-        };
-      }
-      let newCount = 0;
-      for (const l of pageListings) {
-        if (!seenTitles.has(l.title)) {
-          seenTitles.add(l.title);
-          allRawListings.push(l);
-          newCount++;
+        let nextTarget = activePage.locator("button:has([class*='search-pagination-arrow-right'])").first();
+        if ((await nextTarget.count()) === 0) {
+          nextTarget = activePage.locator("[class*='search-pagination-arrow-right']").first();
         }
-      }
-      // 2) If this is the last page, stop
-      if (pageNum >= maxPages) break;
-      // 3) Load more listings for the next "page".
-      //    Goofish uses INFINITE SCROLL — there are no traditional page
-      //    buttons. New listings load when the user scrolls near the bottom.
-      //    Strategy: scroll to the bottom in steps, waiting for new listing
-      //    cards to render after each scroll. We do 6 scroll steps per "page"
-      //    to aggressively load as many new listings as possible.
-      let loadedNew = false;
-      try {
-        let lastCount = await page.locator("[class*='main-title']").count();
-        // Do 6 scroll steps per page to load a full batch of new listings.
-        // Don't break early — keep scrolling to load as many as possible.
-        for (let scrollStep = 0; scrollStep < 6; scrollStep++) {
-          if (Date.now() - startTime > OVERALL_TIMEOUT_MS) break;
-          // Scroll to the very bottom of the page
-          await page.evaluate(() => {
-            window.scrollTo({ top: document.body.scrollHeight, behavior: "instant" });
-          });
-          // Wait for new listings to render (up to 6s per scroll)
-          try {
-            await page.waitForFunction(
-              (prev: number) => {
-                return document.querySelectorAll("[class*='main-title']").length > prev;
-              },
-              lastCount,
-              { timeout: 6000 },
-            );
-            // New listings appeared — update count and continue scrolling
-            lastCount = await page.locator("[class*='main-title']").count();
-            loadedNew = true;
-          } catch {
-            // No new listings after this scroll — try another scroll step
-          }
-          await page.waitForTimeout(600);
-        }
-        // Settle time for prices to hydrate after new listings render
-        await page.waitForTimeout(1500);
-        // Re-dismiss any login modal that may have reappeared after scroll
-        await page.evaluate(() => {
-          document.querySelectorAll('[class*="loginCon"], [class*="login-modal"]').forEach(el => el.remove());
-          document.querySelectorAll('iframe[src*="passport"], iframe[src*="login"]').forEach(el => el.remove());
-          document.body.style.overflow = 'auto';
-        }).catch(() => {});
-        const countAfter = await page.locator("[class*='main-title']").count();
-        // If no new listings loaded after all scroll attempts, stop paginating
-        if (countAfter <= lastCount && pageNum > 1) {
-          loadedNew = false;
-        }
+        if ((await nextTarget.count()) === 0) return false;
+        const firstTitleBefore = (await activePage.locator("[class*='main-title']").first().textContent().catch(() => null))?.trim() ?? null;
+        const countBefore = await activePage.locator("[class*='main-title']").count();
+        await nextTarget.click({ timeout: 3000 });
+        await activePage.waitForTimeout(800);
+        // Wait for the page to actually change: the first title differs or
+        // the rendered card count differs.
+        const changed = await activePage
+          .waitForFunction(
+            (args: { firstTitle: string | null; countBefore: number }) => {
+              const first = document.querySelector("[class*='main-title']");
+              const firstText = first ? first.textContent?.trim() || "" : "";
+              const count = document.querySelectorAll("[class*='main-title']").length;
+              return firstText !== args.firstTitle || count !== args.countBefore;
+            },
+            { firstTitle: firstTitleBefore, countBefore },
+            { timeout: 10000 },
+          )
+          .then(() => true)
+          .catch(() => false);
+        if (!changed) return false;
+        // Prices hydrate after the new page renders
+        await activePage.waitForTimeout(1500);
+        // Re-dismiss any login/Baxia modal that reappeared during navigation
+        await removeGoofishOverlays(activePage);
+        return true;
       } catch {
-        // scroll failed
+        return false;
       }
-      if (!loadedNew && pageNum > 1 && allRawListings.length > 0) break;
+    };
+
+    for (let pageNum = 1; pageNum <= maxPages; pageNum++) {
+      // ── Load + extract ALL listings on the current page ─────────
+      let stableRounds = 0;
+      for (let round = 0; round < MAX_SCROLL_ROUNDS; round++) {
+        if (Date.now() - startTime > OVERALL_TIMEOUT_MS) break;
+        // 1) Extract whatever is currently rendered
+        let batch: Awaited<ReturnType<typeof extractListings>>;
+        try {
+          batch = await extractCurrentDom();
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          lastStatus = `LIVE FETCH FAILED: extraction error on page ${pageNum}: ${msg}`;
+          break;
+        }
+        // Check if the page returned "no results" (showing recommendations instead)
+        if ((batch as any).__noResultsPage === true) {
+          // Goofish returned a "no results" page with unrelated recommendations.
+          // This happens when Baxia CAPTCHA blocks the search query.
+          // Don't extract any listings — return empty with a clear warning.
+          // CRITICAL: close the browser context + browser before returning.
+          // The `ctx` and `freshBrowser` were created OUTSIDE the retry loop;
+          // without this cleanup every "no results" page would leak a full
+          // Chromium process, eventually exhausting file descriptors.
+          if (page) await page.close().catch(() => {});
+          if (ctx) await ctx.close().catch(() => {});
+          await freshBrowser.close().catch(() => {});
+          return {
+            listings: [],
+            status: `LIVE OK (Playwright, 0 listings) | WARNING: Goofish returned "no results" page (showing recommendations). Baxia CAPTCHA likely blocked the search. Try again later or use Manual Paste.`,
+          };
+        }
+        // 2) Accumulate new (unseen) listings
+        let addedNew = 0;
+        for (const l of batch) {
+          if (!seenTitles.has(l.title)) {
+            seenTitles.add(l.title);
+            allRawListings.push(l);
+            addedNew++;
+          }
+        }
+        // 3) End-of-page detection: several consecutive scroll steps that
+        //    yield zero NEW listings mean we've exhausted this page.
+        if (addedNew === 0) {
+          stableRounds++;
+          if (stableRounds >= STABLE_ROUNDS_BEFORE_END) break;
+        } else {
+          stableRounds = 0;
+        }
+        // 4) Scroll down one viewport to trigger the next lazy-load batch.
+        //    Incremental scrolling (not jumping to the bottom) matters for
+        //    virtualized lists — jumping skips rendering the middle cards.
+        await page.evaluate(() => window.scrollBy(0, Math.max(400, window.innerHeight * 0.9)));
+        await page.waitForTimeout(1200);
+      }
+      // Settle time for prices to hydrate after the final batch
+      await page.waitForTimeout(1200);
+      // ── Move to the NEXT page ─────────────────────────────────────
+      // Only after the current page has been fully exhausted.
+      if (pageNum >= maxPages) break;
+      if (Date.now() - startTime > OVERALL_TIMEOUT_MS) break;
+      const wentNext = await clickNextPage();
+      if (!wentNext) break;
+      // Goofish swaps the list in place, so the scroll position from the
+      // previous page persists. Start the next page from the TOP — the
+      // incremental scroll loop above relies on it to render + extract the
+      // whole list (a bottom-anchored start would skip the top cards).
+      await page.evaluate(() => window.scrollTo(0, 0)).catch(() => {});
+      await page.waitForTimeout(500);
     }
     // ── TITLE RELEVANCE CHECK ──────────────────────────────────────
     // Filter out listings whose titles don't share ANY significant keyword
@@ -936,9 +791,14 @@ async function scrapeGoofishLive(
       return queryTokens.some((token) => titleLower.includes(token));
     };
 
-    // Convert raw listings to GoofishListing format
+    // Convert raw listings to GoofishListing format.
+    // Junk listings (phone boxes, rentals, unlock services, scams…) are
+    // filtered here in Node — NOT in the browser evaluate — so the
+    // positional title↔price pairing in the browser stays aligned for
+    // every extracted card.
     const listings: GoofishListing[] = allRawListings
       .filter((r) => r.priceText && parseFloat(r.priceText.replace(/,/g, "")) > 0)
+      .filter((r) => !isJunkListing(r.title))
       .filter((r) => isTitleRelevant(r.title))
       .map((r, i) => {
         const priceCny = Math.round(parseFloat(r.priceText.replace(/,/g, "")));
@@ -1023,7 +883,7 @@ async function scrapeGoofishLive(
       const remaining = OVERALL_TIMEOUT_MS - elapsed;
       if (opts?.enrichAll !== true) {
         // Enrichment disabled — return listings with condition flags only
-        await ctx.close();
+        if (ctx) await ctx.close().catch(() => {});
         await freshBrowser.close();
         return {
           listings: listings.slice(0, config.scraping.max_listings_per_search),
@@ -1032,15 +892,15 @@ async function scrapeGoofishLive(
       }
       if (remaining < 20000) {
         // Not enough time for enrichment — return listings with flags already set
-        await ctx.close();
+        if (ctx) await ctx.close().catch(() => {});
         await freshBrowser.close();
         return {
           listings: listings.slice(0, config.scraping.max_listings_per_search),
           status: `${status} (enrichment skipped — time limit)`,
         };
       }
-      const enrichedListings = await enrichListingsFromPages(ctx, listings, opts);
-      await ctx.close();
+      const enrichedListings = await enrichListingsFromPages(freshBrowser, ctx, listings, opts);
+      if (ctx) await ctx.close().catch(() => {});
       await freshBrowser.close();
       return {
         listings: enrichedListings.slice(0, config.scraping.max_listings_per_search),
@@ -1069,64 +929,9 @@ async function scrapeGoofishLive(
   } // end for loop
 
   // All retries exhausted
-  await ctx.close();
-      await freshBrowser.close();
+  if (ctx) await ctx.close().catch(() => {});
+  await freshBrowser.close();
   return { listings: [], status: lastStatus || `All ${MAX_RETRIES} attempts failed (Baxia blocked or no results)` };
-}
-
-/**
- * Detect condition flags from a listing's title + description text.
- * Called on ALL listings immediately after extraction (before enrichment)
- * so flags are always available even if enrichment is skipped.
- *
- * CRITICAL: flags must be mutually consistent. "无拆修" (Never Opened)
- * CONTAINS "拆修" as a substring, so we check it FIRST and skip "拆修"
- * if "无拆修" is present. Also, if screen/battery was replaced, the phone
- * WAS opened — so "Never Opened" must NOT appear alongside "Screen Replaced"
- * or "Battery Replaced".
- */
-function detectConditionFlags(listing: GoofishListing): void {
-  const fullText = `${listing.title} ${listing.description}`;
-  const flags: string[] = [];
-  // Check "无拆修" (Never Opened) FIRST — if present, no repair flags
-  const hasNeverOpened = fullText.includes("无拆修") || fullText.includes("无拆无修");
-  // Check for repair/replacement indicators (negation-aware)
-  // "无拆修" (no disassembly) should NOT trigger "拆修" — the seller is
-  // explicitly stating no repairs were done.
-  const hasScreenReplaced = includesNonNegated(fullText, "换屏") || includesNonNegated(fullText, "换过屏幕");
-  const hasBatteryReplaced = includesNonNegated(fullText, "换电池") || includesNonNegated(fullText, "换过电池");
-  const hasRepaired = includesNonNegated(fullText, "维修") || includesNonNegated(fullText, "拆修");
-  const hasAnyRepair = hasScreenReplaced || hasBatteryReplaced || hasRepaired;
-  // If "无拆修" is present AND no repair indicators, show "Never Opened"
-  if (hasNeverOpened && !hasAnyRepair) {
-    flags.push("Never Opened");
-  }
-  // Only show "Opened/Repaired" if the phone was actually opened
-  if (hasRepaired) {
-    flags.push("Opened/Repaired");
-  }
-  if (hasScreenReplaced) flags.push("Screen Replaced");
-  if (hasBatteryReplaced) flags.push("Battery Replaced");
-  // Other flags — independent
-  if (/无盒|无原盒/.test(fullText)) flags.push("No Box");
-  // Use negation-aware matching: "无进水" (no water damage) should NOT
-  // trigger the Water Damage flag — the seller is explicitly stating no
-  // water damage. Instead, show a positive "No Water Damage" flag.
-  if (includesNonNegated(fullText, "进水")) {
-    flags.push("Water Damage");
-  } else if (fullText.includes("无进水") || fullText.includes("没进水")) {
-    flags.push("No Water Damage");
-  }
-  if (includesNonNegated(fullText, "漏液")) flags.push("Screen Leak");
-  if (includesNonNegated(fullText, "碎屏")) flags.push("Cracked Screen");
-  if (fullText.includes("有锁")) flags.push("Locked");
-  // "全原" (All Original) — only if NO repair flags
-  if (fullText.includes("全原") && !hasAnyRepair) flags.push("All Original");
-  // "原装" (Original) — only if NO repair flags, DON'T duplicate with "All Original"
-  if (/原装/.test(fullText) && !hasAnyRepair && !flags.includes("All Original")) {
-    flags.push("Original");
-  }
-  listing.conditionFlags = flags;
 }
 
 // ── LISTING ENRICHMENT ────────────────────────────────────────────────
@@ -1135,9 +940,17 @@ function detectConditionFlags(listing: GoofishListing): void {
 //   2. Actual image count from [class*="item-main-window-list-item"] elements
 //   3. Full image URLs from the listing page (not just search thumbnails)
 //
-// Runs concurrently (5 at a time) with an 8s timeout per page.
+// BAXIA PROTECTION: Goofish intermittently overlays listing pages with the
+// SMS-login modal (<div id="login" class="… login-view-sms baxia">…) that
+// appears ~10-15s after load and BLOCKS the listing content. It is removed
+// surgically (never by clicking the X — that makes the listing fail to
+// load), and if the content still doesn't render the current UA is flagged:
+// we rotate to a fresh Windows Chrome UA and retry the listing once.
+//
+// Runs concurrently (5 at a time) with a 10s timeout per page.
 // If enrichment fails for a listing, it keeps the default values.
 async function enrichListingsFromPages(
+  browser: import("playwright").Browser,
   ctx: import("playwright").BrowserContext,
   listings: GoofishListing[],
   opts?: { minPriceCny?: number; maxPriceCny?: number; enrichAll?: boolean },
@@ -1149,155 +962,256 @@ async function enrichListingsFromPages(
   const enrichAll = opts?.enrichAll === true;
   const MAX_TO_ENRICH = enrichAll ? listings.length : Math.min(listings.length, 5);
 
-  // Process listings in batches of CONCURRENCY
-  for (let i = 0; i < MAX_TO_ENRICH; i += CONCURRENCY) {
-    const batch = listings.slice(i, Math.min(i + CONCURRENCY, MAX_TO_ENRICH));
-    console.log(`[Goofish Enrichment] Processing batch ${Math.floor(i / CONCURRENCY) + 1}/${Math.ceil(MAX_TO_ENRICH / CONCURRENCY)} (listings ${i + 1}-${Math.min(i + CONCURRENCY, MAX_TO_ENRICH)}/${MAX_TO_ENRICH})`);
-    await Promise.all(
-      batch.map(async (listing) => {
-        if (!listing.href) return;
-        let detailPage: import("playwright").Page | null = null;
-        try {
-          detailPage = await ctx.newPage();
-          await detailPage.goto(listing.href, {
-            waitUntil: "domcontentloaded",
-            timeout: TIMEOUT_MS,
-          });
-          // Wait for the listing page to render — reduced from 5s to 2s
-          // since we just need the seller rating text which loads early.
-          await detailPage.waitForTimeout(2000);
+  // UA-rotation state: when the Baxia login modal blocks a listing page the
+  // current UA is flagged — rotate and retry with a fresh one.
+  let activeCtx = ctx;
+  let uaIndex = 0;
 
-          // Check for login modal on listing page and remove it
-          await detailPage.evaluate(() => {
-            document
-              .querySelectorAll('[class*="loginCon"], [class*="login-modal"]')
-              .forEach((el) => el.remove());
-            document
-              .querySelectorAll('iframe[src*="passport"], iframe[src*="login"]')
-              .forEach((el) => el.remove());
-            document.body.style.overflow = "auto";
-          }).catch(() => {});
-          // Wait for content to render after modal removal — reduced from 2s to 1s
+  // Enrich a single listing page. Returns:
+  //   "ok"      — content extracted (or no href to open)
+  //   "blocked" — the Baxia login modal blocked the content; caller should
+  //               rotate the UA and retry
+  //   "failed"  — transient error (timeout etc.); keep defaults
+  const enrichOne = async (
+    c: import("playwright").BrowserContext,
+    listing: GoofishListing,
+  ): Promise<"ok" | "blocked" | "failed"> => {
+    if (!listing.href) return "ok";
+    let detailPage: import("playwright").Page | null = null;
+    try {
+      detailPage = await c.newPage();
+      await detailPage.goto(listing.href, {
+        waitUntil: "domcontentloaded",
+        timeout: TIMEOUT_MS,
+      });
+      // Wait for the listing page to render — reduced from 5s to 2s
+      // since we just need the seller rating text which loads early.
+      await detailPage.waitForTimeout(2000);
+
+      // Surgically remove ALL login/Baxia overlays (never click the X —
+      // that makes the listing fail to load).
+      await removeGoofishOverlays(detailPage);
+      // Wait for content to render after modal removal — reduced from 2s to 1s
+      await detailPage.waitForTimeout(1000);
+
+      // Does the listing content exist? (title / image window / seller info)
+      const hasContent = await detailPage.evaluate(() => {
+        return !!document.querySelector(
+          "[class*='item-title'], [class*='item-main-window'], [class*='item-user-info-label'], h1",
+        );
+      }).catch(() => false);
+
+      if (!hasContent) {
+        // The Baxia SMS-login modal appears ~10-15s after load and blocks
+        // the listing. Wait for it; if it shows, the UA is likely flagged.
+        const baxiaAppeared = await detailPage
+          .waitForSelector("#login, [class*='login-view-sms'], [class*='baxia']", {
+            state: "attached",
+            timeout: 10000,
+          })
+          .then(() => true)
+          .catch(() => false);
+        if (baxiaAppeared) {
+          await removeGoofishOverlays(detailPage);
           await detailPage.waitForTimeout(1000);
-
-          // Extract seller rating + image count + image URLs
-          const enriched = await detailPage.evaluate(() => {
-            // 1. Seller rating: look for "好评率97%" in multiple selectors
-            let sellerRating: number | undefined;
-            // Try specific selector first
-            const ratingEls = document.querySelectorAll(
-              '[class*="item-user-info-label"]',
+          const hasContentAfter = await detailPage.evaluate(() => {
+            return !!document.querySelector(
+              "[class*='item-title'], [class*='item-main-window'], [class*='item-user-info-label'], h1",
             );
-            for (const el of ratingEls) {
-              const text = el.textContent || "";
+          }).catch(() => false);
+          if (!hasContentAfter) return "blocked";
+        } else {
+          // No content AND no modal — the page is compromised either way.
+          return "blocked";
+        }
+      }
+
+      // Extract seller rating + image count + image URLs
+      const enriched = await detailPage.evaluate(() => {
+        // 1. Seller rating: look for "好评率97%" in multiple selectors
+        let sellerRating: number | undefined;
+        // Try specific selector first
+        const ratingEls = document.querySelectorAll(
+          '[class*="item-user-info-label"]',
+        );
+        for (const el of ratingEls) {
+          const text = el.textContent || "";
+          const match = text.match(/好评率\s*(\d+)/);
+          if (match) {
+            sellerRating = parseInt(match[1], 10);
+            break;
+          }
+        }
+        // Fallback: search ALL elements for 好评率 pattern
+        if (sellerRating === undefined) {
+          const allEls = document.querySelectorAll("*");
+          for (const el of allEls) {
+            const text = el.textContent || "";
+            if (text.length < 50) { // Only check short text nodes
               const match = text.match(/好评率\s*(\d+)/);
               if (match) {
                 sellerRating = parseInt(match[1], 10);
                 break;
               }
             }
-            // Fallback: search ALL elements for 好评率 pattern
-            if (sellerRating === undefined) {
-              const allEls = document.querySelectorAll("*");
-              for (const el of allEls) {
-                const text = el.textContent || "";
-                if (text.length < 50) { // Only check short text nodes
-                  const match = text.match(/好评率\s*(\d+)/);
-                  if (match) {
-                    sellerRating = parseInt(match[1], 10);
-                    break;
-                  }
-                }
-              }
-            }
-            // Last resort: check body innerText
-            if (sellerRating === undefined) {
-              const bodyText = document.body?.innerText || "";
-              const match = bodyText.match(/好评率\s*(\d+)/);
-              if (match) {
-                sellerRating = parseInt(match[1], 10);
-              }
-            }
+          }
+        }
+        // Last resort: check body innerText
+        if (sellerRating === undefined) {
+          const bodyText = document.body?.innerText || "";
+          const match = bodyText.match(/好评率\s*(\d+)/);
+          if (match) {
+            sellerRating = parseInt(match[1], 10);
+          }
+        }
 
-            // 2. Image count: count [class*="item-main-window-list-item"] elements
-            let imageEls = document.querySelectorAll(
-              '[class*="item-main-window-list-item"]',
-            );
-            // Fallback: try other image container selectors
-            if (imageEls.length === 0) {
-              imageEls = document.querySelectorAll(
-                '[class*="item-main-window"] img, [class*="main-image"] img, [class*="detail-image"] img',
-              );
-            }
-            // Additional fallbacks: try more selectors used by Goofish
-            if (imageEls.length === 0) {
-              imageEls = document.querySelectorAll(
-                '[class*="pic"] img, [class*="gallery"] img, [class*="slider"] img, [class*="carousel"] img, [class*="swiper"] img',
-              );
-            }
-            const imageCount = imageEls.length;
+        // 2. Image count: count [class*="item-main-window-list-item"] elements
+        let imageEls = document.querySelectorAll(
+          '[class*="item-main-window-list-item"]',
+        );
+        // Fallback: try other image container selectors
+        if (imageEls.length === 0) {
+          imageEls = document.querySelectorAll(
+            '[class*="item-main-window"] img, [class*="main-image"] img, [class*="detail-image"] img',
+          );
+        }
+        // Additional fallbacks: try more selectors used by Goofish
+        if (imageEls.length === 0) {
+          imageEls = document.querySelectorAll(
+            '[class*="pic"] img, [class*="gallery"] img, [class*="slider"] img, [class*="carousel"] img, [class*="swiper"] img',
+          );
+        }
+        const imageCount = imageEls.length;
 
-            // 3. Full image URLs from listing page
-            const imageUrls: string[] = [];
-            imageEls.forEach((el) => {
-              const img = el.tagName === "IMG" ? el : el.querySelector("img");
-              const src = img?.getAttribute("src") || img?.getAttribute("data-src") || "";
-              if (src) {
-                const fullUrl = src.startsWith("//")
-                  ? `https:${src}`
-                  : src.startsWith("http")
-                    ? src
-                    : `https:${src}`;
-                imageUrls.push(fullUrl);
-              }
-            });
+        // 3. Full image URLs from listing page
+        const imageUrls: string[] = [];
+        imageEls.forEach((el) => {
+          const img = el.tagName === "IMG" ? el : el.querySelector("img");
+          const src = img?.getAttribute("src") || img?.getAttribute("data-src") || "";
+          if (src) {
+            const fullUrl = src.startsWith("//")
+              ? `https:${src}`
+              : src.startsWith("http")
+                ? src
+                : `https:${src}`;
+            imageUrls.push(fullUrl);
+          }
+        });
 
-            // Fallback: if we found imageCount but no URLs, try ALL images
-            // with alicdn.com in the src (Goofish CDN domain)
-            if (imageCount > 0 && imageUrls.length === 0) {
-              const allImgs = document.querySelectorAll(
-                'img[src*="alicdn.com"], img[data-src*="alicdn.com"]',
-              );
-              allImgs.forEach((img) => {
-                const src = img.getAttribute("src") || img.getAttribute("data-src") || "";
-                if (src) {
-                  const fullUrl = src.startsWith("//")
-                    ? `https:${src}`
-                    : src.startsWith("http")
-                      ? src
-                      : `https:${src}`;
-                  imageUrls.push(fullUrl);
-                }
-              });
+        // Fallback: if we found imageCount but no URLs, try ALL images
+        // with alicdn.com in the src (Goofish CDN domain)
+        if (imageCount > 0 && imageUrls.length === 0) {
+          const allImgs = document.querySelectorAll(
+            'img[src*="alicdn.com"], img[data-src*="alicdn.com"]',
+          );
+          allImgs.forEach((img) => {
+            const src = img.getAttribute("src") || img.getAttribute("data-src") || "";
+            if (src) {
+              const fullUrl = src.startsWith("//")
+                ? `https:${src}`
+                : src.startsWith("http")
+                  ? src
+                  : `https:${src}`;
+              imageUrls.push(fullUrl);
             }
-
-            return { sellerRating, imageCount, imageUrls };
           });
+        }
 
-          // Apply enrichment to the listing
-          if (enriched.sellerRating !== undefined) {
-            listing.sellerRating = enriched.sellerRating;
-          }
-          if (enriched.imageCount > 0) {
-            listing.imageCount = enriched.imageCount;
-            // Replace search-page thumbnail with full listing-page images
-            if (enriched.imageUrls.length > 0) {
-              listing.imageUrls = enriched.imageUrls;
-            }
-          }
+        return { sellerRating, imageCount, imageUrls };
+      });
 
-          // Note: condition flags are already detected by detectConditionFlags()
-          // which runs on ALL listings before enrichment. No need to re-detect here.
-        } catch (e) {
-          // Enrichment failed for this listing — keep defaults
-          console.log(`[Goofish Enrichment] Failed for ${listing.href}: ${e instanceof Error ? e.message : String(e)}`);
-        } finally {
-          if (detailPage) await detailPage.close().catch(() => {});
+      // Apply enrichment to the listing
+      if (enriched.sellerRating !== undefined) {
+        listing.sellerRating = enriched.sellerRating;
+      }
+      if (enriched.imageCount > 0) {
+        listing.imageCount = enriched.imageCount;
+        // Replace search-page thumbnail with full listing-page images
+        if (enriched.imageUrls.length > 0) {
+          listing.imageUrls = enriched.imageUrls;
+        }
+      }
+
+      // ── Full description + spec labels ─────────────────────────────
+      // The search-card text is TRUNCATED and misses key condition info —
+      // "版本：海外有锁" (overseas carrier-locked) only appears in the detail
+      // page's spec/labels block. Capture the listing's OWN description
+      // (largest desc-like block — recommendation cards are much smaller)
+      // plus the labels block (品牌/型号/版本/成色/拆修和功能), merge them
+      // into the listing, and re-run flag detection so Locked / Water /
+      // Repair flags reflect the FULL listing text.
+      const detailText = await detailPage.evaluate(() => {
+        let description = "";
+        let bestLen = 0;
+        document.querySelectorAll("[class*='desc']").forEach((el) => {
+          const t = (el.textContent || "").replace(/\s+/g, " ").trim();
+          if (t.length > bestLen) { bestLen = t.length; description = t; }
+        });
+        // Spec/labels block — first block containing 版本 in DOM order.
+        let labels = "";
+        document.querySelectorAll("[class*='labels'], [class*='spec'], [class*='params']").forEach((el) => {
+          if (labels) return;
+          const t = (el.textContent || "").replace(/\s+/g, " ").trim();
+          if (t.includes("版本") && t.length < 600) labels = t;
+        });
+        if (!labels) {
+          // Fallback: any short element containing the full spec header.
+          document.querySelectorAll("div, li, span").forEach((el) => {
+            if (labels) return;
+            const t = (el.textContent || "").replace(/\s+/g, " ").trim();
+            if (t.includes("版本") && t.includes("品牌") && t.length < 600) labels = t;
+          });
+        }
+        return { description, labels };
+      }).catch(() => ({ description: "", labels: "" }));
+
+      const mergedDesc = [
+        detailText.description && detailText.description.length > listing.description.length
+          ? detailText.description
+          : listing.description,
+        detailText.labels,
+      ].filter(Boolean).join(" ").trim();
+      if (mergedDesc && mergedDesc !== listing.description) {
+        listing.description = mergedDesc;
+        // Re-detect condition flags on the FULL title + detail text — the
+        // search-page detection may have missed spec-table conditions.
+        detectConditionFlags(listing);
+      }
+
+      return "ok";
+    } catch (e) {
+      // Enrichment failed for this listing — keep defaults
+      console.log(`[Goofish Enrichment] Failed for ${listing.href}: ${e instanceof Error ? e.message : String(e)}`);
+      return "failed";
+    } finally {
+      if (detailPage) await detailPage.close().catch(() => {});
+    }
+  };
+
+  // Process listings in batches of CONCURRENCY
+  for (let i = 0; i < MAX_TO_ENRICH; i += CONCURRENCY) {
+    const batch = listings.slice(i, Math.min(i + CONCURRENCY, MAX_TO_ENRICH));
+    console.log(`[Goofish Enrichment] Processing batch ${Math.floor(i / CONCURRENCY) + 1}/${Math.ceil(MAX_TO_ENRICH / CONCURRENCY)} (listings ${i + 1}-${Math.min(i + CONCURRENCY, MAX_TO_ENRICH)}/${MAX_TO_ENRICH})`);
+    await Promise.all(
+      batch.map(async (listing) => {
+        const result = await enrichOne(activeCtx, listing);
+        if (result === "blocked") {
+          // The current UA is flagged by Baxia — rotate to a fresh UA and
+          // retry this listing once. The new context has no prior history
+          // or cookies, giving it a clean anti-bot slate.
+          console.log(`[Goofish Enrichment] Baxia modal blocked ${listing.href} — rotating user agent and retrying`);
+          await activeCtx.close().catch(() => {});
+          uaIndex++;
+          activeCtx = await createGoofishContext(browser, uaIndex);
+          await enrichOne(activeCtx, listing);
         }
       }),
     );
   }
 
+  // Close the rotated context if we created one (the caller closes the
+  // original context itself).
+  if (activeCtx !== ctx) await activeCtx.close().catch(() => {});
   return listings;
 }
 

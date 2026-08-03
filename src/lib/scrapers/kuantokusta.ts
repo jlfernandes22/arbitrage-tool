@@ -11,7 +11,9 @@
 import { config } from "@/lib/config";
 import type { Condition, EuMarketComp, NormalizedProduct } from "@/lib/engine/types";
 import { buildEuQuery } from "@/lib/engine/matcher";
+import { isTitleRelevantToQuery } from "@/lib/engine/relevance";
 import { createContext } from "./browser";
+import { sleep, jitter, isAccessoryTitle } from "./utils";
 
 export interface KuantokustaScrapeResult {
   comps: EuMarketComp[];
@@ -25,22 +27,22 @@ function buildKuantokustaSearchUrl(query: string, page: number = 1): string {
   return page > 1 ? `${base}&page=${page}` : base;
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
-}
-
-function jitter(minMs: number, maxMs: number): number {
-  return Math.floor(Math.random() * (maxMs - minMs)) + minMs;
-}
-
 /**
  * Parse KuantoKusta search results from raw HTML.
  * KuantoKusta is a Next.js SPA that embeds product data in <script> tags
  * as JSON (Next.js __NEXT_DATA__ or similar). We also try regex extraction
  * from the rendered HTML.
+ *
+ * `fallbackUsed` is set to true when the unreliable Strategy 3 (broad
+ * price + title extraction) had to be used, so the caller can warn the
+ * user that title↔price pairing may be inaccurate.
  */
-function parseKkHtml(html: string, baseUrl: string): Array<{ title: string; priceEur: number; store: string }> {
-  const items: Array<{ title: string; priceEur: number; store: string }> = [];
+function parseKkHtml(
+  html: string,
+  baseUrl: string,
+): { items: Array<{ title: string; priceEur: number; store: string; url?: string }>; fallbackUsed: boolean } {
+  const items: Array<{ title: string; priceEur: number; store: string; url?: string }> = [];
+  let fallbackUsed = false;
   try {
     // Strategy 1: Extract from Next.js __NEXT_DATA__ JSON
     const nextDataMatch = html.match(/<script[^>]*id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/);
@@ -56,8 +58,15 @@ function parseKkHtml(html: string, baseUrl: string): Array<{ title: string; pric
           const title = p.name || p.title || "";
           const priceEur = parseFloat(p.price || p.minPrice || p.priceEur || "0");
           const store = p.store || p.merchant || p.shop || "Loja";
+          let url: string | undefined;
+          const rawUrl = p.url || p.slug || p.link;
+          if (typeof rawUrl === "string" && rawUrl.startsWith("/")) {
+            url = `https://www.kuantokusta.pt${rawUrl}`;
+          } else if (typeof rawUrl === "string" && rawUrl.startsWith("http")) {
+            url = rawUrl;
+          }
           if (title && priceEur > 0 && priceEur <= 10000) {
-            items.push({ title: title.substring(0, 120), priceEur, store });
+            items.push({ title: title.substring(0, 120), priceEur, store, url });
           }
         }
       } catch {
@@ -76,43 +85,74 @@ function parseKkHtml(html: string, baseUrl: string): Array<{ title: string; pric
         const cleanPrice = m[3].replace(/[\s.\u00A0]/g, "").replace(",", ".");
         const priceEur = parseFloat(cleanPrice);
         if (title && priceEur > 0 && priceEur <= 10000) {
-          items.push({ title: title.substring(0, 120), priceEur, store: "Loja" });
+          items.push({
+            title: title.substring(0, 120),
+            priceEur,
+            store: "Loja",
+            url: `https://www.kuantokusta.pt${m[1]}`,
+          });
         }
       }
     }
 
-    // Strategy 3: Broad price + title extraction
+    // Strategy 3: Broad price + title extraction.
+    // This strategy is UNRELIABLE — titles and prices are extracted
+    // independently from the whole page (nav bars, footer links, etc.).
+    // The old code paired them by array index, silently matching the 1st
+    // nav price to the 1st product title. Instead, correlate each title
+    // with the NEAREST price that appears AFTER it in the HTML, and flag
+    // the fallback so the user knows results may be inaccurate.
     if (items.length === 0) {
-      // Find all € prices and try to pair them with nearby titles
+      fallbackUsed = true;
+      console.warn(
+        "[kuantokusta] HTML fallback parser activated: no structured product data found. Titles and prices are correlated by HTML proximity — data may be inaccurate.",
+      );
       const priceRegex = /(\d[\d\s.\u00A0]*(?:,\d{1,2})?)\s*€/g;
-      const prices: number[] = [];
+      const priceHits: Array<{ priceEur: number; index: number }> = [];
       let pm: RegExpExecArray | null;
-      while ((pm = priceRegex.exec(html)) && prices.length < 50) {
+      while ((pm = priceRegex.exec(html)) && priceHits.length < 200) {
         const cleanPrice = pm[1].replace(/[\s.\u00A0]/g, "").replace(",", ".");
         const priceEur = parseFloat(cleanPrice);
-        if (priceEur > 1 && priceEur <= 10000) prices.push(priceEur);
+        if (priceEur > 1 && priceEur <= 10000) priceHits.push({ priceEur, index: pm.index });
       }
-      // Find product titles (h2, h3, or elements with product-related classes)
-      const titleRegex = /<(?:h2|h3|a)[^>]*>([^<]{5,120})<\/(?:h2|h3|a)>/g;
-      const titles: string[] = [];
+      // Find product titles (h2, h3, or elements with product-related classes).
+      // Also capture the href when the element is an <a> so we can link
+      // straight to the listing.
+      const titleRegex = /<(?:h2|h3|a)([^>]*)>([^<]{5,120})<\/(?:h2|h3|a)>/g;
+      const titleHits: Array<{ title: string; index: number; href?: string }> = [];
       let tm: RegExpExecArray | null;
-      while ((tm = titleRegex.exec(html)) && titles.length < 50) {
-        const title = tm[1].trim();
+      while ((tm = titleRegex.exec(html)) && titleHits.length < 100) {
+        const title = tm[2].trim();
         // Filter out navigation items
         if (title.length > 5 && !title.includes("Pesquisa") && !title.includes("Início")) {
-          titles.push(title);
+          let href: string | undefined;
+          const hrefMatch = tm[1].match(/href="([^"]+)"/);
+          if (hrefMatch) {
+            const raw = hrefMatch[1];
+            if (raw.startsWith("/")) href = `https://www.kuantokusta.pt${raw}`;
+            else if (raw.startsWith("http")) href = raw;
+          }
+          titleHits.push({ title, index: tm.index, href });
         }
       }
-      // Pair titles with prices positionally
-      const count = Math.min(titles.length, prices.length);
-      for (let i = 0; i < count; i++) {
-        items.push({ title: titles[i].substring(0, 120), priceEur: prices[i], store: "Loja" });
+      // Pair each title with the nearest price AFTER it in the HTML
+      // (each price is consumed at most once). Prices too far from the
+      // title (> 1500 chars) or missing are skipped.
+      let pricePtr = 0;
+      for (const t of titleHits) {
+        while (pricePtr < priceHits.length && priceHits[pricePtr].index < t.index) pricePtr++;
+        const p = priceHits[pricePtr];
+        if (!p) break;
+        if (p.index - (t.index + t.title.length) > 1500) continue;
+        items.push({ title: t.title.substring(0, 120), priceEur: p.priceEur, store: "Loja", url: t.href });
+        pricePtr++;
+        if (items.length >= 50) break;
       }
     }
   } catch {
     // ignore
   }
-  return items;
+  return { items, fallbackUsed };
 }
 
 /**
@@ -167,19 +207,21 @@ async function scrapeKuantokustaLive(
   euQuery: string,
   maxPages: number,
 ): Promise<{ comps: EuMarketComp[]; status: string }> {
-  const allItems: Array<{ title: string; priceEur: number; store: string }> = [];
+  const allItems: Array<{ title: string; priceEur: number; store: string; url?: string }> = [];
   const seenTitles = new Set<string>();
 
   // Strategy 1: Plain HTTP fetch (less likely to be blocked)
+  let usedFallbackParser = false;
   for (let pageNum = 1; pageNum <= maxPages; pageNum++) {
     const { html } = await fetchKkHtml(euQuery, pageNum);
     if (html) {
-      const items = parseKkHtml(html, buildKuantokustaSearchUrl(euQuery, pageNum));
+      const { items, fallbackUsed } = parseKkHtml(html, buildKuantokustaSearchUrl(euQuery, pageNum));
+      if (fallbackUsed) usedFallbackParser = true;
       let newCount = 0;
       for (const item of items) {
         if (item.priceEur < 100 || item.priceEur > 3000) continue;
-        const titleLower = item.title.toLowerCase();
-        if (/\b(case|cover|capa|film|protector|protetor|charger|carregador|cable|cabo|adapter|adaptador|screen|ecra|écrã|battery|bateria|holder|suporte|stand|dock|mount|bracket|clip|sticker|skin|decal|tempered|vidro|película|pelicula)\b/i.test(titleLower)) continue;
+        if (isAccessoryTitle(item.title)) continue;
+        if (!isTitleRelevantToQuery(item.title, euQuery)) continue;
         if (!seenTitles.has(item.title)) {
           seenTitles.add(item.title);
           allItems.push(item);
@@ -201,13 +243,16 @@ async function scrapeKuantokustaLive(
         title: c.title,
         priceEur: c.priceEur,
         condition: "new" as Condition,
+        url: c.url,
         location: "Portugal",
         vendorType: c.store,
         negotiable: false,
         viewCount: 0,
         isRetail: true,
       })),
-      status: `LIVE OK (HTTP fetch, ${allItems.length} comps)`,
+      status: usedFallbackParser
+        ? `LIVE OK (HTTP fetch, ${allItems.length} comps) | WARNING: used fallback parser — titles/prices are correlated by HTML proximity and may be mispaired`
+        : `LIVE OK (HTTP fetch, ${allItems.length} comps)`,
     };
   }
 
@@ -251,7 +296,7 @@ async function scrapeKuantokustaLive(
       }
 
       const pageItems = await page.evaluate(() => {
-        const items: Array<{ title: string; priceEur: number; store: string }> = [];
+        const items: Array<{ title: string; priceEur: number; store: string; url?: string }> = [];
         // Find all links to /produto/ and walk up to find prices
         const productLinks = document.querySelectorAll("a[href*='/produto/']");
         const cardSet = new Set<Element>();
@@ -267,7 +312,7 @@ async function scrapeKuantokustaLive(
           }
         });
         cardSet.forEach((card) => {
-          const productLink = card.querySelector("a[href*='/produto/']");
+          const productLink = card.querySelector<HTMLAnchorElement>("a[href*='/produto/']");
           const title = productLink?.textContent?.trim() || "";
           if (!title) return;
           const allText = (card.textContent || "").replace(/\s+/g, " ").trim();
@@ -280,8 +325,10 @@ async function scrapeKuantokustaLive(
           if (!priceEur) return;
           const storeEl = card.querySelector("[class*='store'], [class*='merchant'], [class*='shop'], [class*='seller']");
           const store = storeEl?.textContent?.trim() || "Loja";
+          // Direct listing URL from the product anchor (resolved absolute).
+          const url = productLink?.href || undefined;
           if (title && priceEur > 0) {
-            items.push({ title: title.substring(0, 120), priceEur, store });
+            items.push({ title: title.substring(0, 120), priceEur, store, url });
           }
         });
         return items;
@@ -290,8 +337,8 @@ async function scrapeKuantokustaLive(
       let newCount = 0;
       for (const item of pageItems) {
         if (item.priceEur < 100 || item.priceEur > 3000) continue;
-        const titleLower = item.title.toLowerCase();
-        if (/\b(case|cover|capa|film|protector|protetor|charger|carregador|cable|cabo|adapter|adaptador|screen|ecra|écrã|battery|bateria|holder|suporte|stand|dock|mount|bracket|clip|sticker|skin|decal|tempered|vidro|película|pelicula)\b/i.test(titleLower)) continue;
+        if (isAccessoryTitle(item.title)) continue;
+        if (!isTitleRelevantToQuery(item.title, euQuery)) continue;
         if (!seenTitles.has(item.title)) {
           seenTitles.add(item.title);
           allItems.push(item);
@@ -309,6 +356,7 @@ async function scrapeKuantokustaLive(
           title: c.title,
           priceEur: c.priceEur,
           condition: "new" as Condition,
+          url: c.url,
           location: "Portugal",
           vendorType: c.store,
           negotiable: false,

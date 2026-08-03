@@ -126,6 +126,9 @@ export function TaskHistory({
         return <XCircle className="h-3.5 w-3.5 text-rose-600" />;
       case "paused":
         return <Clock className="h-3.5 w-3.5 text-amber-600" />;
+      case "cancelled":
+        // Terminal state — must NOT render the running spinner.
+        return <XCircle className="h-3.5 w-3.5 text-slate-500" />;
       default:
         return <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />;
     }
@@ -343,4 +346,3 @@ export function TaskHistory({
     </Card>
   );
 }
-export { RotateCcw, Trash2 };

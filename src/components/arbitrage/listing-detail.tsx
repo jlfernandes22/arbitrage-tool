@@ -70,7 +70,20 @@ interface Translation {
 
 // Module-level cache: listingId → translation. Survives dialog open/close
 // so re-opening the same listing doesn't re-hit the LLM API.
+// Bounded to TRANSLATION_CACHE_MAX entries — the oldest entries are evicted
+// when the cap is reached so the map can't grow unbounded.
+const TRANSLATION_CACHE_MAX = 200;
 const translationCache = new Map<string, Translation>();
+function cacheTranslation(key: string, value: Translation): void {
+  // Refresh recency on re-cache so frequently-viewed listings are kept
+  if (translationCache.has(key)) translationCache.delete(key);
+  translationCache.set(key, value);
+  while (translationCache.size > TRANSLATION_CACHE_MAX) {
+    const oldestKey = translationCache.keys().next().value;
+    if (oldestKey === undefined) break;
+    translationCache.delete(oldestKey);
+  }
+}
 
 export function ListingDetailDialog({
   listing,
@@ -123,19 +136,25 @@ export function ListingDetailDialog({
             conditionRaw: n?.conditionRaw,
           }),
         });
+        // Race guard: if the user switched to a different listing while this
+        // request was in flight, discard the stale response (both success and
+        // error) so it can't shadow the current listing's translation.
+        if (translatedIdRef.current !== null && translatedIdRef.current !== cacheKey) return;
         if (!res.ok) {
           const err = await res.json().catch(() => ({ error: "translate failed" }));
           throw new Error(err.error ?? "translate failed");
         }
         const data: Translation = await res.json();
-        translationCache.set(cacheKey, data);
+        if (translatedIdRef.current !== null && translatedIdRef.current !== cacheKey) return;
+        cacheTranslation(cacheKey, data);
         setTranslation(data);
         translatedIdRef.current = cacheKey;
       } catch (e) {
+        if (translatedIdRef.current !== null && translatedIdRef.current !== cacheKey) return;
         const msg = e instanceof Error ? e.message : String(e);
         setTranslateError(msg);
       } finally {
-        setTranslating(false);
+        if (translatedIdRef.current === cacheKey) setTranslating(false);
       }
     },
     [l, n],
@@ -321,12 +340,12 @@ export function ListingDetailDialog({
               </div>
             </section>
             {/* Image Gallery — displays all listing images from Goofish */}
-            {l.imageUrls.length > 0 && (
+            {safeImageUrls.length > 0 && (
               <section className="min-w-0 rounded-lg border bg-muted/30 p-3">
                 <h4 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                   <Images className="h-3.5 w-3.5" />
-                  Listing Images ({l.imageUrls.length}
-                  {l.imageCount && l.imageCount > l.imageUrls.length
+                  Listing Images ({safeImageUrls.length}
+                  {l.imageCount && l.imageCount > safeImageUrls.length
                     ? ` of ${l.imageCount}`
                     : ""})
                 </h4>
@@ -334,7 +353,7 @@ export function ListingDetailDialog({
                   {/* Main image view */}
                   <div className="relative aspect-square w-full overflow-hidden rounded-md bg-muted/40 sm:aspect-[4/3]">
                     <img
-                      src={normalizeImageUrl(l.imageUrls[selectedImage])}
+                      src={normalizeImageUrl(safeImageUrls[selectedImage] ?? "")}
                       alt={`${l.title} — image ${selectedImage + 1}`}
                       className="h-full w-full object-contain"
                       referrerPolicy="no-referrer"
@@ -601,7 +620,7 @@ export function ListingDetailDialog({
                 <Telemetry
                   icon={Images}
                   label="Images"
-                  value={String(l.imageCount ?? l.imageUrls.length)}
+                  value={String(l.imageCount ?? safeImageUrls.length)}
                 />
               </div>
             </section>

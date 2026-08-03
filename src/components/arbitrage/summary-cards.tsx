@@ -8,7 +8,6 @@ import {
   Eye,
   EyeOff,
   ShieldAlert,
-  TrendingUp,
   Percent,
   Trophy,
 } from "lucide-react";
@@ -206,8 +205,4 @@ export function SummaryCards({ summary, activeFilter = null, onFilterChange }: S
       })}
     </div>
   );
-}
-
-export function PipelineIcon() {
-  return <TrendingUp className="h-4 w-4" />;
 }

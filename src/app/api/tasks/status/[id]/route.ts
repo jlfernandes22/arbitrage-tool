@@ -27,6 +27,10 @@ export async function GET(
     try {
       const row = await db.task.findUnique({ where: { id } });
       if (row) {
+        const TERMINAL = new Set(["done", "error", "paused", "cancelled"]);
+        // Only report finished_at for terminal rows — a row that was
+        // mid-run when the process died must not claim a finish time.
+        const terminal = TERMINAL.has(row.status);
         task = {
           id: row.id,
           query: row.query,
@@ -38,7 +42,7 @@ export async function GET(
           warnings: [],
           degraded: row.degraded,
           startedAt: row.createdAt.getTime(),
-          finishedAt: row.updatedAt.getTime(),
+          finishedAt: terminal ? row.updatedAt.getTime() : undefined,
           logs: [],
         } as TaskState;
         setTask(id, task);

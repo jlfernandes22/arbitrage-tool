@@ -8,6 +8,34 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 /**
+ * Dismiss Amazon's cookie-consent banner (form#cos-banner) via the Accept
+ * (sp-cc-accept) or Decline (sp-cc-rejectall-link) submit inputs. Verified
+ * live with Playwright: clicking either removes the overlay.
+ */
+async function dismissCookieBanner(page: import("playwright").Page): Promise<boolean> {
+  const selectors = ["#sp-cc-accept", "#sp-cc-rejectall-link"];
+  for (const sel of selectors) {
+    const btn = page.locator(sel).first();
+    try {
+      if ((await btn.count()) === 0) continue;
+      if (!(await btn.isVisible({ timeout: 1500 }))) continue;
+      await btn.click({ timeout: 3000 });
+      await page.waitForTimeout(1200);
+      return true;
+    } catch {
+      try {
+        await btn.click({ force: true, timeout: 2000 });
+        await page.waitForTimeout(1200);
+        return true;
+      } catch {
+        // try the next selector
+      }
+    }
+  }
+  return false;
+}
+
+/**
  * GET /api/debug/amazon?query=iPhone+15+Pro+256GB
  */
 export async function GET(req: NextRequest) {
@@ -49,18 +77,26 @@ export async function GET(req: NextRequest) {
     // Visit home first
     await page.goto("https://www.amazon.es/", { waitUntil: "domcontentloaded", timeout: 15000 });
     await page.waitForTimeout(3000);
+    const bannerOnHome = await page.locator("form#cos-banner, #sp-cc-accept, #sp-cc-rejectall-link").count();
+    const bannerDismissed = await dismissCookieBanner(page);
     const homeTitle = await page.title();
-    (diagnostics.steps as Array<Record<string, unknown>>).push({ step: "2. Home page", homeTitle, homeBlocked: homeTitle.includes("sentimos") });
+    (diagnostics.steps as Array<Record<string, unknown>>).push({
+      step: "2. Home page", homeTitle, homeBlocked: homeTitle.includes("sentimos"),
+      cookieBannerPresent: bannerOnHome > 0, cookieBannerDismissed: bannerDismissed,
+    });
 
     // Search
     const url = `https://www.amazon.es/s?k=${encodeURIComponent(query)}`;
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: 20000 });
     await page.waitForTimeout(4000);
+    const bannerOnSearch = await page.locator("form#cos-banner, #sp-cc-accept, #sp-cc-rejectall-link").count();
+    if (bannerOnSearch > 0) await dismissCookieBanner(page);
     const searchTitle = await page.title();
     const cardCount = await page.locator("div[data-component-type='s-search-result']").count();
     const htmlLen = await page.evaluate(() => document.documentElement.outerHTML.length);
     (diagnostics.steps as Array<Record<string, unknown>>).push({
       step: "3. Search page", searchTitle, cardCount, htmlLen, searchBlocked: searchTitle.includes("sentimos"),
+      cookieBannerOnSearch: bannerOnSearch > 0,
     });
 
     // Screenshot
@@ -74,9 +110,15 @@ export async function GET(req: NextRequest) {
     const samples = await page.evaluate(() => {
       const cards = document.querySelectorAll("div[data-component-type='s-search-result']");
       return Array.from(cards).slice(0, 5).map(card => {
-        const titleEl = card.querySelector("h2 a span, h2 span.a-text-normal, h2 a");
+        const h2 = card.querySelector("h2");
+        const titleEl = card.querySelector("h2 a span, h2 span.a-text-normal, h2 span");
         const priceEl = card.querySelector("[class*='a-price'] [class*='a-offscreen']");
-        return { title: titleEl?.textContent?.trim()?.substring(0, 80) || "", price: priceEl?.textContent?.trim() || "NO PRICE" };
+        const linkEl = card.querySelector<HTMLAnchorElement>("h2 a[href*='/dp/'], a[href*='/dp/'], a[href]");
+        return {
+          title: (titleEl?.textContent?.trim() || h2?.getAttribute("aria-label") || "").substring(0, 80),
+          price: priceEl?.textContent?.trim() || "NO PRICE",
+          url: linkEl?.href?.substring(0, 90) || "NO LINK",
+        };
       });
     });
     (diagnostics.steps as Array<Record<string, unknown>>).push({ step: "5. Samples", samples });

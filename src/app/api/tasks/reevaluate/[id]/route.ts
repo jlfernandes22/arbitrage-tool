@@ -16,6 +16,7 @@ import {
 } from "@/lib/engine";
 import { getReferencePrices } from "@/lib/reference-prices";
 import { buildSummary } from "@/lib/orchestrator";
+import { sanitizeConfigOverrides } from "@/lib/overrides";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 /**
@@ -75,18 +76,24 @@ export async function POST(
       { status: 404 },
     );
   }
-  // Parse optional config overrides from the request body
+  // Parse optional config overrides from the request body. They go through
+  // the SAME allowlist/clamp sanitizer as the submit API — a client must not
+  // be able to fabricate profitability with fake rates/thresholds.
   let body: unknown = {};
   try {
     body = await req.json();
   } catch {
     /* empty body is fine — use defaults */
   }
-  const { configOverrides } = body as { configOverrides?: Partial<AppConfig> };
-  const cfg = resolveConfig(configOverrides ?? task.configOverrides);
+  const { configOverrides } = body as { configOverrides?: unknown };
+  const sanitized = sanitizeConfigOverrides(configOverrides);
+  if (!sanitized.ok) {
+    return NextResponse.json({ error: sanitized.error }, { status: 400 });
+  }
+  const cfg = resolveConfig(sanitized.overrides as Partial<AppConfig> | undefined ?? task.configOverrides);
   appendLog(id, "INFO", "[Re-eval] Re-running scam detection + profit calc with current reference prices (no re-scrape)");
   try {
-    const forex = await getCnyToEurRate();
+    const forex = await getCnyToEurRate(cfg.forex.cny_to_eur_rate);
     appendLog(id, "INFO", `[Re-eval] Forex CNY→EUR=${forex.rate} (source: ${forex.source})`);
     const refPrices = await getReferencePrices();
     appendLog(id, "INFO", `[Re-eval] Loaded ${Object.keys(refPrices).length} reference price entries`);

@@ -111,5 +111,8 @@ export async function GET() {
       summary,
     });
   }
+  // 4. Global sort — in-memory active tasks were emitted first, but the
+  //    sidebar must show the newest scan on top regardless of storage layer.
+  tasks.sort((a, b) => new Date(b.started_at).getTime() - new Date(a.started_at).getTime());
   return NextResponse.json({ tasks });
 }

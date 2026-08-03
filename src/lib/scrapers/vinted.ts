@@ -7,7 +7,9 @@
 import { config } from "@/lib/config";
 import type { EuMarketComp, NormalizedProduct } from "@/lib/engine/types";
 import { buildEuQuery } from "@/lib/engine/matcher";
+import { isTitleRelevantToQuery } from "@/lib/engine/relevance";
 import { createContext } from "./browser";
+import { isAccessoryTitle } from "./utils";
 export interface VintedScrapeResult {
   comps: EuMarketComp[];
   degraded: boolean;
@@ -39,7 +41,7 @@ async function scrapeVintedLive(euQuery: string, maxPages: number): Promise<{ co
   const ctx = await createContext("pt-PT");
   try {
     const page = await ctx.newPage();
-    const allItems: Array<{ title: string; priceEur: number; condition: string; brand: string }> = [];
+    const allItems: Array<{ title: string; priceEur: number; condition: string; brand: string; url?: string }> = [];
     const seenTitles = new Set<string>();
     for (let pageNum = 1; pageNum <= maxPages; pageNum++) {
       const url = buildVintedSearchUrl(euQuery, pageNum);
@@ -73,7 +75,7 @@ async function scrapeVintedLive(euQuery: string, maxPages: number): Promise<{ co
       await page.evaluate(() => window.scrollBy(0, 800));
       await page.waitForTimeout(1500);
       const pageItems = await page.evaluate(() => {
-        const items: Array<{ title: string; priceEur: number; condition: string; brand: string }> = [];
+        const items: Array<{ title: string; priceEur: number; condition: string; brand: string; url?: string }> = [];
         const selectors = ["[class*='feed-grid__item']", "[class*='ItemBox']", "[class*='item-box']", "[data-testid='catalog-item']", "[class*='u-word-break']"];
         let cards: Element[] = [];
         for (const sel of selectors) {
@@ -94,7 +96,12 @@ async function scrapeVintedLive(euQuery: string, maxPages: number): Promise<{ co
             if (allText.includes("Novo")) condition = "new";
             else if (allText.includes("Como novo")) condition = "excellent";
             else if (allText.includes("Bom estado")) condition = "good";
-            if (title && priceEur > 0) items.push({ title: title.substring(0, 120), priceEur, condition, brand: extractBrandFromTitle(title) });
+            // Direct listing URL: prefer the Vinted item anchor (/items/…),
+            // fall back to the first anchor href inside the card.
+            const itemLink = card.querySelector<HTMLAnchorElement>("a[href*='/items/']")
+              || card.querySelector<HTMLAnchorElement>("a[href]");
+            const url = itemLink?.href || undefined;
+            if (title && priceEur > 0) items.push({ title: title.substring(0, 120), priceEur, condition, brand: extractBrandFromTitle(title), url });
           });
         }
         return items;
@@ -104,8 +111,9 @@ async function scrapeVintedLive(euQuery: string, maxPages: number): Promise<{ co
         // Filter out accessories and junk prices:
         if (item.priceEur < 100 || item.priceEur > 3000) continue;
         // Filter out accessory keywords in title
-        const titleLower = item.title.toLowerCase();
-        if (/\b(case|cover|capa|film|protector|protetor|charger|carregador|cable|cabo|adapter|adaptador|screen|ecra|écrã|battery|bateria|holder|suporte|stand|dock|mount|bracket|clip|sticker|skin|decal|tempered|vidro|película|pelicula)\b/i.test(titleLower)) continue;
+        if (isAccessoryTitle(item.title)) continue;
+        // Generation-aware relevance: reject wrong models for the query
+        if (!isTitleRelevantToQuery(item.title, euQuery)) continue;
         if (!seenTitles.has(item.title)) {
           seenTitles.add(item.title);
           allItems.push(item);
@@ -121,6 +129,7 @@ async function scrapeVintedLive(euQuery: string, maxPages: number): Promise<{ co
         title: c.title,
         priceEur: c.priceEur,
         condition: c.condition as EuMarketComp["condition"],
+        url: c.url,
         location: "Portugal",
         brand: c.brand,
         sellerStars: 4.5,
@@ -135,34 +144,6 @@ async function scrapeVintedLive(euQuery: string, maxPages: number): Promise<{ co
   } finally {
     await ctx.close();
   }
-}
-function parseVintedHtml(html: string): EuMarketComp[] {
-  const comps: EuMarketComp[] = [];
-  try {
-    const offerRegex =
-      /"title"\s*:\s*"([^"]{4,120})"[^}]*?"price"\s*:\s*{"[^}]*?"amount"\s*:\s*"(\d+(?:\.\d+)?)"[^}]*?}/g;
-    let m: RegExpExecArray | null;
-    let idx = 0;
-    while ((m = offerRegex.exec(html)) && idx < 30) {
-      const title = m[1];
-      const priceEur = parseFloat(m[2]);
-      if (!title || !priceEur) continue;
-      comps.push({
-        id: `vinted-real-${idx}`,
-        platform: "vinted",
-        title,
-        priceEur,
-        condition: "very_good",
-        location: "Portugal",
-        brand: extractBrandFromTitle(title),
-        sellerStars: 4.5,
-      });
-      idx++;
-    }
-  } catch {
-    // ignore
-  }
-  return comps;
 }
 export async function scrapeVinted(
   product: NormalizedProduct | null,

@@ -4,7 +4,9 @@
 import { config } from "@/lib/config";
 import type { Condition, EuMarketComp, NormalizedProduct } from "@/lib/engine/types";
 import { buildEuQuery, scoreEuComp } from "@/lib/engine/matcher";
+import { isTitleRelevantToQuery } from "@/lib/engine/relevance";
 import { createContext } from "./browser";
+import { sleep, jitter, isAccessoryTitle } from "./utils";
 export interface OlxScrapeResult {
   comps: EuMarketComp[];
   degraded: boolean;
@@ -24,12 +26,6 @@ export function buildOlxSearchUrl(query: string, page: number = 1): string {
   const base = `${config.scraping.olx_search_url}${slug}/`;
   return page > 1 ? `${base}?page=${page}` : base;
 }
-function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
-}
-function jitter(minMs: number, maxMs: number): number {
-  return Math.floor(Math.random() * (maxMs - minMs)) + minMs;
-}
 /**
  * Scrape real OLX.pt listings using Playwright (real browser).
  * Extracts title + price + location from the rendered DOM.
@@ -38,7 +34,7 @@ async function scrapeOlxLive(euQuery: string, maxPages: number): Promise<{ comps
   const ctx = await createContext("pt-PT");
   try {
     const page = await ctx.newPage();
-    const allItems: Array<{ title: string; priceEur: number; location: string; condition: string }> = [];
+    const allItems: Array<{ title: string; priceEur: number; location: string; condition: string; url?: string }> = [];
     const seenTitles = new Set<string>();
     for (let pageNum = 1; pageNum <= maxPages; pageNum++) {
       const url = buildOlxSearchUrl(euQuery, pageNum);
@@ -54,7 +50,7 @@ async function scrapeOlxLive(euQuery: string, maxPages: number): Promise<{ comps
         await page.waitForTimeout(2000);
       }
       const pageItems = await page.evaluate(() => {
-        const items: Array<{ title: string; priceEur: number; location: string; condition: string }> = [];
+        const items: Array<{ title: string; priceEur: number; location: string; condition: string; url?: string }> = [];
         const cards = document.querySelectorAll("[data-cy='l-card']");
         cards.forEach((card) => {
           const titleEl = card.querySelector("h4, h6");
@@ -74,8 +70,13 @@ async function scrapeOlxLive(euQuery: string, maxPages: number): Promise<{ comps
           else if (allText.includes("Como novo")) condition = "excellent";
           else if (allText.includes("Usado")) condition = "good";
           const title = titleEl?.textContent?.trim() || "";
+          // Direct listing URL: prefer the OLX listing anchor (/d/anuncio/…),
+          // fall back to the first anchor href inside the card.
+          const listingLink = card.querySelector<HTMLAnchorElement>("a[href*='/d/anuncio/'], a[href*='/d/']")
+            || card.querySelector<HTMLAnchorElement>("a[href]");
+          const url = listingLink?.href || undefined;
           if (title && priceEur > 0) {
-            items.push({ title: title.substring(0, 120), priceEur, location: locationMatch?.[1]?.trim() || "Portugal", condition });
+            items.push({ title: title.substring(0, 120), priceEur, location: locationMatch?.[1]?.trim() || "Portugal", condition, url });
           }
         });
         return items;
@@ -87,8 +88,9 @@ async function scrapeOlxLive(euQuery: string, maxPages: number): Promise<{ comps
         // > €3000 = parsing errors or bundles
         if (item.priceEur < 100 || item.priceEur > 3000) continue;
         // Filter out accessory keywords in title
-        const titleLower = item.title.toLowerCase();
-        if (/\b(case|cover|capa|film|protector|protetor|charger|carregador|cable| cabo|adapter|adaptador|screen|ecra|écrã|battery|bateria|holder|suporte|stand|dock|mount|bracket|clip|sticker|skin|decal|tempered|vidro|película|pelicula)\b/i.test(titleLower)) continue;
+        if (isAccessoryTitle(item.title)) continue;
+        // Generation-aware relevance: reject wrong models for the query
+        if (!isTitleRelevantToQuery(item.title, euQuery)) continue;
         if (!seenTitles.has(item.title)) {
           seenTitles.add(item.title);
           allItems.push(item);
@@ -105,6 +107,7 @@ async function scrapeOlxLive(euQuery: string, maxPages: number): Promise<{ comps
         title: c.title,
         priceEur: c.priceEur,
         condition: c.condition as Condition,
+        url: c.url,
         location: c.location,
         vendorType: "Particular",
         negotiable: false,
@@ -117,37 +120,6 @@ async function scrapeOlxLive(euQuery: string, maxPages: number): Promise<{ comps
     const msg = e instanceof Error ? e.message : String(e);
     return { comps: [], status: `LIVE FETCH FAILED: ${msg}` };
   }
-}
-function parseOlxHtml(html: string): EuMarketComp[] {
-  const comps: EuMarketComp[] = [];
-  try {
-    // OLX embeds listing data in JSON-LD or data attributes.
-    // Try JSON-LD offers first.
-    const offerRegex =
-      /"name"\s*:\s*"([^"]{4,120})"[^}]*?"price"\s*:\s*"?(\d+(?:\.\d+)?)"?[^}]*?"priceCurrency"\s*:\s*"EUR"/g;
-    let m: RegExpExecArray | null;
-    let idx = 0;
-    while ((m = offerRegex.exec(html)) && idx < 30) {
-      const title = m[1];
-      const priceEur = parseFloat(m[2]);
-      if (!title || !priceEur) continue;
-      comps.push({
-        id: `olx-real-${idx}`,
-        platform: "olx",
-        title,
-        priceEur,
-        condition: "very_good",
-        location: "Lisboa",
-        vendorType: "Particular",
-        negotiable: true,
-        viewCount: 0,
-      });
-      idx++;
-    }
-  } catch {
-    // ignore
-  }
-  return comps;
 }
 export async function scrapeOlx(
   product: NormalizedProduct | null,

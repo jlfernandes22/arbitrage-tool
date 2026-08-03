@@ -31,13 +31,19 @@ const CRITICAL_BLACKLIST = [
   { token: "山寨", label: "knock-off" },
   { token: "高仿", label: "replica" },
   { token: "翻新", label: "refurbished" },
-  { token: "有锁", label: "carrier locked" },
   { token: "ID锁", label: "iCloud locked" },
   { token: "坏无拆", label: "broken uninspected" },
   { token: "进水", label: "water damaged" },
   { token: "扩容", label: "storage expanded (fake)" },
   { token: "黑解", label: "blacklisted unlock" },
   { token: "监管锁", label: "MDM supervised lock" },
+];
+// Tokens that need regex context: "有锁" (carrier locked) must NOT match
+// "有锁屏密码" (has a lockscreen password — completely normal). Only match
+// when 锁 is not followed by 屏.
+const CRITICAL_BLACKLIST_REGEX = [
+  { pattern: /有锁(?!屏)/, label: "carrier locked" },
+  { pattern: /有网络锁|有运营商锁|有激活锁/, label: "carrier locked" },
 ];
 // LAYER 3 — Yellow Modifiers (+10 each, capped at 20 — reduced from 20/40)
 const YELLOW_MODIFIERS = [
@@ -225,6 +231,14 @@ export function detectScam(
       for (const phrase of negated) {
         positiveDeclarations.push(`${phrase} (no ${item.label})`);
       }
+    }
+  }
+  // Regex blacklist (context-sensitive tokens like 有锁 vs 有锁屏密码).
+  for (const item of CRITICAL_BLACKLIST_REGEX) {
+    if (item.pattern.test(text)) {
+      matchedBlacklist.push(`有锁 (${item.label})`);
+      dropped = true;
+      risk = 100;
     }
   }
   if (dropped) {

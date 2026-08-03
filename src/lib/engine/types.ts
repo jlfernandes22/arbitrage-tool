@@ -60,6 +60,9 @@ export interface EuMarketComp {
   title: string;
   priceEur: number;
   condition: Condition;
+  // url: direct link to the marketplace listing (not a search URL).
+  // Populated by the scrapers when the listing link is available.
+  url?: string;
   location?: string;
   vendorType?: string;
   negotiable?: boolean;
@@ -72,10 +75,6 @@ export interface EuMarketComp {
   // buckets and to compare new vs used pricing. OLX/Vinted comps leave this
   // undefined (treated as used).
   isRetail?: boolean;
-}
-// Helper: is this comp from a NEW/retail source (KuantoKusta, Amazon)?
-export function isRetailComp(c: EuMarketComp): boolean {
-  return c.isRetail === true || c.platform === "kuantokusta" || c.platform === "amazon";
 }
 export interface ScamReport {
   riskScore: number; // 0-100

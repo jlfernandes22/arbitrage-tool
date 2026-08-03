@@ -23,6 +23,9 @@ interface RefPrice {
 }
 const seedRecord = seedPrices as Record<string, RefPrice>;
 let seeded = false;
+// Promise-based lock so two concurrent first-requests can't both attempt
+// createMany (which would trip the unique constraint on standardKey).
+let seedingPromise: Promise<void> | null = null;
 /** Infer category from the standardKey prefix. */
 function inferCategory(standardKey: string): string {
   if (/^iPhone/i.test(standardKey)) return "iphone";
@@ -39,26 +42,36 @@ function inferCategory(standardKey: string): string {
 /** Seed the DB from the JSON file if the table is empty. Idempotent. */
 export async function ensureSeeded(): Promise<void> {
   if (seeded) return;
-  try {
-    const count = await db.referencePrice.count();
-    if (count > 0) {
-      seeded = true;
-      return;
-    }
-    const rows = Object.entries(seedRecord).map(([key, p]) => ({
-      standardKey: key,
-      category: inferCategory(key),
-      newPrice: p.new,
-      excellentPrice: p.excellent,
-      veryGoodPrice: p.very_good,
-      goodPrice: p.good,
-      fairPrice: p.fair ?? Math.round(p.good * 0.75),
-    }));
-    await db.referencePrice.createMany({ data: rows });
-    seeded = true;
-  } catch {
-    // DB unavailable — callers fall back to JSON
+  // Only one seed attempt runs at a time; concurrent callers await the same
+  // promise instead of racing their own count()/createMany().
+  if (!seedingPromise) {
+    seedingPromise = (async () => {
+      try {
+        const count = await db.referencePrice.count();
+        if (count > 0) {
+          seeded = true;
+          return;
+        }
+        const rows = Object.entries(seedRecord).map(([key, p]) => ({
+          standardKey: key,
+          category: inferCategory(key),
+          newPrice: p.new,
+          excellentPrice: p.excellent,
+          veryGoodPrice: p.very_good,
+          goodPrice: p.good,
+          fairPrice: p.fair ?? Math.round(p.good * 0.75),
+        }));
+        await db.referencePrice.createMany({ data: rows });
+        seeded = true;
+      } catch {
+        // DB unavailable — callers fall back to JSON
+      }
+    })();
+    seedingPromise.finally(() => {
+      seedingPromise = null;
+    });
   }
+  await seedingPromise;
 }
 /**
  * Get all reference prices as a record (standardKey -> RefPrice).

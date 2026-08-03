@@ -65,8 +65,14 @@ export async function GET(
           for (const listing of parsed.listings) {
             if (listing && typeof listing === "object") {
               if (!Array.isArray(listing.euComps)) listing.euComps = [];
-              if (!Array.isArray(listing.imageUrls)) listing.imageUrls = [];
-              if (!Array.isArray(listing.conditionFlags)) listing.conditionFlags = [];
+              // imageUrls / conditionFlags live NESTED under listing.listing
+              // (the GoofishListing) — the EvaluatedListing itself has no
+              // such fields, so guarding them at THIS level was a no-op.
+              const inner = listing.listing;
+              if (inner && typeof inner === "object") {
+                if (!Array.isArray(inner.imageUrls)) inner.imageUrls = [];
+                if (!Array.isArray(inner.conditionFlags)) inner.conditionFlags = [];
+              }
               if (listing.scam && typeof listing.scam === "object") {
                 if (!Array.isArray(listing.scam.reasons)) listing.scam.reasons = [];
                 if (!Array.isArray(listing.scam.matchedYellowTokens)) listing.scam.matchedYellowTokens = [];
@@ -116,8 +122,12 @@ export async function GET(
   for (const listing of safeListings) {
     if (listing && typeof listing === "object") {
       if (!Array.isArray(listing.euComps)) listing.euComps = [];
-      if (!Array.isArray(listing.imageUrls)) listing.imageUrls = [];
-      if (!Array.isArray(listing.conditionFlags)) listing.conditionFlags = [];
+      // imageUrls / conditionFlags live on the nested GoofishListing.
+      const inner = listing.listing;
+      if (inner && typeof inner === "object") {
+        if (!Array.isArray(inner.imageUrls)) inner.imageUrls = [];
+        if (!Array.isArray(inner.conditionFlags)) inner.conditionFlags = [];
+      }
       if (listing.scam && typeof listing.scam === "object") {
         if (!Array.isArray(listing.scam.reasons)) listing.scam.reasons = [];
         if (!Array.isArray(listing.scam.matchedYellowTokens)) listing.scam.matchedYellowTokens = [];

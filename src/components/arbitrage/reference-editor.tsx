@@ -54,6 +54,7 @@ const CATEGORY_LABELS: Record<string, string> = {
 export function ReferenceEditor({ open, onOpenChange }: ReferenceEditorProps) {
   const [rows, setRows] = useState<PriceRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState<string | null>(null);
   const [filter, setFilter] = useState<string>("all");
   const [adding, setAdding] = useState(false);
@@ -69,13 +70,18 @@ export function ReferenceEditor({ open, onOpenChange }: ReferenceEditorProps) {
     fair: 0,
   });
   const load = useCallback(async () => {
+    setLoading(true);
+    setLoadError(null);
     try {
       const res = await fetch("/api/config/prices", { cache: "no-store" });
-      if (!res.ok) return;
+      if (!res.ok) {
+        setLoadError(`Failed to load reference prices (HTTP ${res.status}).`);
+        return;
+      }
       const data = await res.json();
       setRows(data.prices ?? []);
     } catch {
-      /* ignore */
+      setLoadError("Failed to load reference prices. Check the server connection.");
     } finally {
       setLoading(false);
     }
@@ -452,6 +458,14 @@ export function ReferenceEditor({ open, onOpenChange }: ReferenceEditorProps) {
           {loading ? (
             <div className="flex items-center justify-center py-12">
               <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+            </div>
+          ) : loadError ? (
+            <div className="flex flex-col items-center justify-center gap-2 py-12 text-center">
+              <p className="text-xs text-rose-600 dark:text-rose-400">{loadError}</p>
+              <Button variant="outline" size="sm" onClick={load} className="h-7 text-xs">
+                <Loader2 className="mr-1.5 h-3 w-3" />
+                Retry
+              </Button>
             </div>
           ) : (
             <div className="overflow-x-auto">

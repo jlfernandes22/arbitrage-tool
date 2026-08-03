@@ -47,22 +47,6 @@ model ReferencePrice {
   @@index([category])
 }
 
-model MarketComp {
-  id        String   @id @default(cuid())
-  platform  String // olx | vinted
-  queryKey  String
-  title     String
-  priceEur  Float
-  condition String?
-  location  String?
-  dataJson  String
-  fetchedAt DateTime @default(now())
-  expiresAt DateTime
-
-  @@index([platform, queryKey])
-  @@index([expiresAt])
-}
-
 model ForexRate {
   id        String   @id @default(cuid())
   fromCcy   String

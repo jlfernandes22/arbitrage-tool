@@ -85,7 +85,6 @@ import { ProfitHeatmap, extractFamily } from "@/components/arbitrage/profit-heat
 import { ProductTrend } from "@/components/arbitrage/product-trend";
 import { ReferenceEditor } from "@/components/arbitrage/reference-editor";
 import { exportListingsCsv, exportListingsJson } from "@/components/arbitrage/csv-export";
-import { ensureArray } from "@/lib/utils";
 import { useSavedQueries } from "@/hooks/use-saved-queries";
 import { useKeyboardShortcuts, SHORTCUTS_HELP } from "@/hooks/use-keyboard-shortcuts";
 import type { ResultsTableHandle } from "@/components/arbitrage/results-table";
@@ -94,6 +93,7 @@ export default function Home() {
   const [query, setQuery] = useState("iPhone 15 Pro 256GB");
   const [category, setCategory] = useState<Category>("iphone");
   const [scanning, setScanning] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   const [taskId, setTaskId] = useState<string | null>(null);
   const [status, setStatus] = useState<TaskStatusResponse | null>(null);
   const [result, setResult] = useState<TaskResult | null>(null);
@@ -115,11 +115,33 @@ export default function Home() {
   // elapsed time and estimate remaining time based on progress.
   const scanStartedAtRef = useRef<number | null>(null);
   const [scanElapsed, setScanElapsed] = useState<number>(0);
-  // Smoothed ETA estimate to prevent the +9s-per-second bug.
-  // Uses exponential moving average (α=0.3) so the estimate converges
-  // as progress advances, and caps growth so ETA never increases
-  // faster than real elapsed time.
-  const etaRef = useRef<number | null>(null);
+  // ── ETA tracking ──────────────────────────────────────────────────────
+  // The naive elapsed/progress extrapolation grows forever whenever progress
+  // stalls (e.g. a slow scraper pinned at a checkpoint), making the "est.
+  // left" number climb without bound. Instead we sample (timestamp, progress)
+  // on every poll and derive the remaining time from the RATE of progress
+  // over the last window. When progress isn't advancing, no ETA is shown.
+  const progressSamplesRef = useRef<Array<{ t: number; p: number }>>([]);
+  const estimateRemaining = useCallback((progress: number): number | null => {
+    if (progress >= 100) return 0;
+    if (progress < 5) return null; // too early for a reliable rate
+    const samples = progressSamplesRef.current;
+    const now = Date.now();
+    const cutoff = now - 45000;
+    const recent = samples.filter((s) => s.t >= cutoff);
+    if (recent.length >= 2) {
+      const first = recent[0];
+      const last = recent[recent.length - 1];
+      const dtSec = (last.t - first.t) / 1000;
+      const dp = last.p - first.p;
+      if (dtSec > 3 && dp > 0.4) {
+        const rate = dp / dtSec; // progress % per second
+        const remaining = (100 - last.p) / rate;
+        if (remaining > 0) return Math.min(Math.round(remaining), 900); // cap 15 min
+      }
+    }
+    return null; // stalled or too few samples — don't show a runaway ETA
+  }, []);
   // Tracks whether the component is mounted to prevent setState after unmount
   // (e.g. if a fetch resolves after navigation away).
   const mountedRef = useRef(true);
@@ -137,16 +159,28 @@ export default function Home() {
       pollRef.current = null;
     }
   }, []);
+  // Guards against double-submitting a scan before the disabled state of
+  // the Start button renders (double-click / Enter+click in the same tick).
+  const submittingRef = useRef(false);
+  // Tracks WHICH task id the current poll loop belongs to. An in-flight
+  // tick from a PREVIOUS task (superseded by a newer scan) must not mutate
+  // state or reschedule timers — otherwise the new scan's polling dies and
+  // the old task's results get displayed.
+  const pollTaskIdRef = useRef<string | null>(null);
   const pollStatus = useCallback(
     (id: string) => {
       stopPolling();
+      pollTaskIdRef.current = id;
       let interval = 800;
       const tick = async () => {
         if (!mountedRef.current) return;
+        // This tick belongs to a superseded poll — drop it entirely.
+        if (pollTaskIdRef.current !== id) return;
         try {
           const res = await fetch(`/api/tasks/status/${id}`, {
             cache: "no-store",
           });
+          if (pollTaskIdRef.current !== id) return;
           // ── Handle non-OK responses explicitly ──
           // Previously `if (!res.ok) return;` silently bailed, leaving
           // `scanning=true` forever and the spinner spinning (especially
@@ -156,6 +190,7 @@ export default function Home() {
               // Task truly doesn't exist (not in memory, not in DB).
               // Stop polling + clear scanning + surface the error.
               stopPolling();
+              pollTaskIdRef.current = null;
               setScanning(false);
               setError("Task not found. It may have been from a previous session.");
               toast.error("Task not found");
@@ -167,11 +202,13 @@ export default function Home() {
             return;
           }
           const data: TaskStatusResponse = await res.json();
+          if (pollTaskIdRef.current !== id) return;
           if (!mountedRef.current) return;
           setStatus(data);
           setLogs(Array.isArray(data.logs) ? data.logs : []);
           if (data.status === "done") {
             stopPolling();
+            pollTaskIdRef.current = null;
             setScanning(false);
             // fetch result
             try {
@@ -179,6 +216,7 @@ export default function Home() {
                 `/api/tasks/result/${id}?include_hidden=1`,
                 { cache: "no-store" },
               );
+              if (pollTaskIdRef.current !== null && pollTaskIdRef.current !== id) return;
               if (rres.ok) {
                 const rdata: TaskResult = await rres.json();
                 setResult(rdata);
@@ -186,23 +224,32 @@ export default function Home() {
                 toast.success(
                   `Scan complete — ${rdata.summary.shown} viable leads of ${rdata.summary.total} listings`,
                 );
+              } else {
+                // Result reload failed (e.g. task evicted after a restart) —
+                // surface it instead of silently leaving a blank screen.
+                setError("Scan finished, but the result could not be reloaded. Select the task from history.");
+                toast.error("Failed to reload result");
               }
             } catch {
-              /* ignore */
+              setError("Scan finished, but the result could not be reloaded. Select the task from history.");
+              toast.error("Failed to reload result");
             }
             return;
           } else if (data.status === "error") {
             stopPolling();
+            pollTaskIdRef.current = null;
             setScanning(false);
             setError(data.error ?? "Pipeline error");
             toast.error("Scan failed");
             return;
           } else if (data.status === "paused") {
             stopPolling();
+            pollTaskIdRef.current = null;
             setScanning(false);
             return;
           } else if (data.status === "cancelled") {
             stopPolling();
+            pollTaskIdRef.current = null;
             setScanning(false);
             setHistoryRefreshKey((k) => k + 1);
             toast.info("Scan cancelled");
@@ -210,6 +257,7 @@ export default function Home() {
           }
           // Adaptive interval: poll faster while progress is changing
           // (active pipeline), slower when idle/paused to reduce load.
+          if (pollTaskIdRef.current !== id) return;
           const prev = pollProgressRef.current;
           pollProgressRef.current = data.progress;
           if (data.progress !== prev) {
@@ -219,6 +267,7 @@ export default function Home() {
           }
           pollRef.current = setTimeout(tick, interval) as unknown as ReturnType<typeof setInterval>;
         } catch {
+          if (pollTaskIdRef.current !== id) return;
           /* network blip — retry with backoff */
           interval = Math.min(interval + 500, 3000);
           pollRef.current = setTimeout(tick, interval) as unknown as ReturnType<typeof setInterval>;
@@ -238,6 +287,10 @@ export default function Home() {
   }, [stopPolling]);
   const handleScan = useCallback(
     async (q: string, c: Category, overrides: AppConfigOverrides) => {
+      // Double-submit guard: two clicks in the same tick would otherwise
+      // launch two server-side pipelines racing for the UI.
+      if (submittingRef.current) return;
+      submittingRef.current = true;
       // If a scan is already running, cancel the old task first so they don't conflict
       if (taskId && scanning) {
         fetch(`/api/tasks/cancel/${taskId}`, { method: "POST" }).catch(() => {});
@@ -248,9 +301,12 @@ export default function Home() {
       setResult(null);
       setStatus(null);
       setLogs([]);
+      // Filters are scoped to the loaded result — a new scan must not inherit
+      // the previous result's card/heatmap filters (they'd show "0 of N").
+      setCardFilter(null);
+      setHeatmapCell(null);
       scanStartedAtRef.current = Date.now();
       setScanElapsed(0);
-      etaRef.current = null; // reset ETA for new scan
       setHistoryRefreshKey((k) => k + 1); // refresh history so the new in-progress task appears
       try {
         const res = await fetch("/api/tasks/submit", {
@@ -271,15 +327,17 @@ export default function Home() {
         const msg = e instanceof Error ? e.message : String(e);
         setError(msg);
         toast.error(`Failed to start scan: ${msg}`);
+      } finally {
+        submittingRef.current = false;
       }
     },
     [taskId, scanning, stopPolling, pollStatus],
   );
   const handleManualPaste = useCallback(
-    async (html: string) => {
+    async (html: string): Promise<boolean> => {
       if (!taskId) {
         toast.error("No active task to resume");
-        return;
+        return false;
       }
       try {
         const res = await fetch(`/api/tasks/manual_paste/${taskId}`, {
@@ -294,9 +352,11 @@ export default function Home() {
         toast.success("Resuming pipeline from manual paste…");
         setScanning(true);
         pollStatus(taskId);
+        return true;
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         toast.error(`Resume failed: ${msg}`);
+        return false;
       }
     },
     [taskId, pollStatus],
@@ -310,6 +370,7 @@ export default function Home() {
       toast.error("No active scan to stop");
       return;
     }
+    setCancelling(true);
     try {
       const res = await fetch(`/api/tasks/cancel/${taskId}`, { method: "POST" });
       if (!res.ok) {
@@ -330,6 +391,8 @@ export default function Home() {
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       toast.error(`Cancel failed: ${msg}`);
+    } finally {
+      setCancelling(false);
     }
   }, [taskId, stopPolling]);
   // Load a past task's result from history
@@ -338,6 +401,11 @@ export default function Home() {
       stopPolling();
       setScanning(false);
       setError(null);
+      // Logs and filters belong to the loaded task — don't carry the
+      // previous scan's terminal output or card/heatmap filters over.
+      setLogs([]);
+      setCardFilter(null);
+      setHeatmapCell(null);
       try {
         const rres = await fetch(
           `/api/tasks/result/${t.task_id}?include_hidden=1`,
@@ -371,6 +439,8 @@ export default function Home() {
       setStatus(null);
       setLogs([]);
       setError(null);
+      setCardFilter(null);
+      setHeatmapCell(null);
       // Use the current config panel values (captured in the ref) so the
       // re-run respects the user's tuned VAT/shipping/threshold settings.
       handleScan(t.query, t.category as Category, currentOverridesRef.current);
@@ -391,6 +461,8 @@ export default function Home() {
           setStatus(null);
           setTaskId(null);
           setLogs([]);
+          setCardFilter(null);
+          setHeatmapCell(null);
         }
         const res = await fetch(`/api/tasks/${deleteTaskId}`, { method: "DELETE" });
         if (!res.ok) {
@@ -405,31 +477,30 @@ export default function Home() {
     },
     [taskId, stopPolling],
   );
-  // Clear all history (both in-memory store + SQLite DB).
-  const handleClearAll = useCallback(async () => {
+  // Clear ALL scan history (in-memory store + SQLite DB). Resets the active
+  // result/state since every task is gone.
+  const handleClearAllHistory = useCallback(async () => {
     try {
-      // If there's an active task, stop it first
-      if (taskId) {
-        stopPolling();
-        fetch(`/api/tasks/cancel/${taskId}`, { method: "POST" }).catch(() => {});
-        setScanning(false);
-        setResult(null);
-        setStatus(null);
-        setTaskId(null);
-        setLogs([]);
-      }
       const res = await fetch("/api/tasks/clear-all", { method: "DELETE" });
       if (!res.ok) {
         const e = await res.json().catch(() => ({}));
         throw new Error(e.error ?? "clear failed");
       }
-      const data = await res.json();
-      toast.success(`Cleared ${data.memDeleted + data.dbDeleted} scans from history`);
+      stopPolling();
+      setScanning(false);
+      setResult(null);
+      setStatus(null);
+      setTaskId(null);
+      setLogs([]);
+      setError(null);
+      setCardFilter(null);
+      setHeatmapCell(null);
       setHistoryRefreshKey((k) => k + 1);
+      toast.success("Scan history cleared");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to clear history");
     }
-  }, [taskId, stopPolling]);
+  }, [stopPolling]);
   // Re-evaluate: re-run profit calc on the current task's stored listings
   // using current reference prices + config, WITHOUT re-scraping. Useful
   // after editing the reference price matrix or adjusting config overrides.
@@ -479,6 +550,22 @@ export default function Home() {
       }
     }, 1000);
     return () => clearInterval(interval);
+  }, [scanning]);
+  // ── Record progress samples for the velocity-based ETA ───────────────
+  // Every status poll appends a (timestamp, progress) sample and prunes
+  // anything older than the 45s window used by estimateRemaining().
+  useEffect(() => {
+    if (!scanning || !status) return;
+    const samples = progressSamplesRef.current;
+    const t = Date.now();
+    samples.push({ t, p: status.progress ?? 0 });
+    const cutoff = t - 45000;
+    while (samples.length > 0 && samples[0].t < cutoff) samples.shift();
+    if (samples.length > 120) samples.shift();
+  }, [status, scanning]);
+  // Reset the sample buffer when a new scan starts
+  useEffect(() => {
+    if (scanning) progressSamplesRef.current = [];
   }, [scanning]);
   // ── Filtered listings for export ────────────────────────────────────
   // When a card filter or heatmap cell filter is active, CSV/JSON export
@@ -571,7 +658,7 @@ export default function Home() {
                 <SheetHeader className="px-4 pt-4">
                   <SheetTitle className="text-sm">Scan History</SheetTitle>
                 </SheetHeader>
-                <div className="mt-2 h-[calc(100vh-5rem)] overflow-hidden">
+                <div className="mt-2 h-[calc(100vh-5rem)] overflow-y-auto">
                   <TaskHistory
                     activeTaskId={taskId}
                     onSelect={(t) => {
@@ -600,7 +687,7 @@ export default function Home() {
                       toast.success(wasSaved ? "Query unpinned" : "Query pinned to sidebar");
                     }}
                     onDeleteTask={handleDeleteTask}
-                    onClearAll={handleClearAll}
+                    onClearAll={handleClearAllHistory}
                   />
                 </div>
               </SheetContent>
@@ -655,8 +742,10 @@ export default function Home() {
             {/* sticky container: pinned below the header (top-[4.5rem]) and
                 capped so it never overlaps the footer at the bottom.
                 max-h keeps the sidebar scrollable within the viewport minus
-                the header height and a footer-safe margin. */}
-            <div className="sticky top-[4.5rem] max-h-[calc(100vh-6rem)] overflow-hidden">
+                the header height and a footer-safe margin.
+                overflow-y-auto (not overflow-hidden) so pinned queries and
+                long histories can't get clipped with no way to scroll. */}
+            <div className="sticky top-[4.5rem] max-h-[calc(100vh-6rem)] overflow-y-auto">
               <TaskHistory
                 activeTaskId={taskId}
                 onSelect={handleSelectHistory}
@@ -678,89 +767,97 @@ export default function Home() {
                   toast.success(wasSaved ? "Query unpinned" : "Query pinned to sidebar");
                 }}
                 onDeleteTask={handleDeleteTask}
-                onClearAll={handleClearAll}
+                onClearAll={handleClearAllHistory}
               />
-            </div>
-            {/* ── EU Market Comp Links (below scan history in sidebar) ── */}
-            {safeListings.length > 0 && (() => {
-              const allComps = safeListings.flatMap((l) => ensureArray(l.euComps));
-              const seen = new Set<string>();
-              const deduped = allComps.filter((c) => {
-                const key = `${c.platform}:${c.title}:${c.priceEur}`;
-                if (seen.has(key)) return false;
-                seen.add(key);
-                return true;
-              }).sort((a, b) => a.priceEur - b.priceEur);
-              if (deduped.length === 0) return null;
-              const platformColors: Record<string, string> = {
-                olx: "border-teal-300 bg-teal-50 text-teal-700 dark:border-teal-800 dark:bg-teal-950/40 dark:text-teal-300",
-                vinted: "border-fuchsia-300 bg-fuchsia-50 text-fuchsia-700 dark:border-fuchsia-800 dark:bg-fuchsia-950/40 dark:text-fuchsia-300",
-                kuantokusta: "border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300",
-                amazon: "border-orange-300 bg-orange-50 text-orange-700 dark:border-orange-800 dark:bg-orange-950/40 dark:text-orange-300",
-              };
-              const platformUrls: Record<string, (title: string) => string> = {
-                olx: (t) => `https://www.olx.pt/q-${t.toLowerCase().replace(/\s+/g, "-")}`,
-                vinted: (t) => `https://www.vinted.pt/catalog?search_text=${encodeURIComponent(t)}`,
-                kuantokusta: (t) => `https://www.kuantokusta.pt/search?q=${encodeURIComponent(t)}`,
-                amazon: (t) => `https://www.amazon.es/s?k=${encodeURIComponent(t)}`,
-              };
-              return (
-                <div className="mt-3">
-                  <Collapsible>
-                    <div className="flex items-center gap-2">
-                      <CollapsibleTrigger asChild>
-                        <Button variant="outline" size="sm" className="w-full gap-1">
-                          <Globe className="h-3.5 w-3.5" />
-                          EU Market Links ({deduped.length})
-                          <ChevronDown className="ml-auto h-3.5 w-3.5" />
-                        </Button>
-                      </CollapsibleTrigger>
-                    </div>
-                    <CollapsibleContent className="mt-2">
-                      <div className="max-h-64 overflow-y-auto rounded-lg border">
-                        <UITable>
-                          <UITableHeader className="sticky top-0 bg-background">
-                            <UITableRow>
-                              <UITableHead className="w-16 p-2 text-[10px]">Source</UITableHead>
-                              <UITableHead className="p-2 text-[10px]">Title</UITableHead>
-                              <UITableHead className="text-right p-2 text-[10px]">€</UITableHead>
-                              <UITableHead className="w-10 p-2"></UITableHead>
-                            </UITableRow>
-                          </UITableHeader>
-                          <UITableBody>
-                            {deduped.slice(0, 50).map((c, i) => (
-                              <UITableRow key={`${c.platform}-${i}`}>
-                                <UITableCell className="p-2">
-                                  <Badge variant="outline" className={`text-[9px] ${platformColors[c.platform] || ""}`}>
-                                    {c.platform === "kuantokusta" ? "KK" : c.platform === "amazon" ? "AMZ" : c.platform}
-                                  </Badge>
-                                </UITableCell>
-                                <UITableCell className="max-w-[120px] truncate p-2 text-[10px]" title={c.title}>
-                                  {c.title}
-                                </UITableCell>
-                                <UITableCell className="text-right p-2 text-[10px] font-medium tabular-nums">
-                                  €{c.priceEur}
-                                </UITableCell>
-                                <UITableCell className="p-2">
-                                  <a
-                                    href={platformUrls[c.platform]?.(c.title) || "#"}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="text-primary hover:underline"
-                                  >
-                                    <ExternalLink className="h-3 w-3" />
-                                  </a>
-                                </UITableCell>
-                              </UITableRow>
-                            ))}
-                          </UITableBody>
-                        </UITable>
+              {/* ── EU Market Comp Links ──────────────────────────────
+                  Kept INSIDE the sticky scroll container (not a sibling)
+                  so it scrolls together with the Scan History instead of
+                  sliding underneath the pinned card and overlapping it. */}
+              {safeListings.length > 0 && (() => {
+                const allComps = safeListings.flatMap((l) =>
+                  Array.isArray(l.euComps) ? l.euComps : []
+                );
+                const seen = new Set<string>();
+                const deduped = allComps.filter((c) => {
+                  const key = `${c.platform}:${c.title}:${c.priceEur}`;
+                  if (seen.has(key)) return false;
+                  seen.add(key);
+                  return true;
+                }).sort((a, b) => a.priceEur - b.priceEur);
+                if (deduped.length === 0) return null;
+                const platformColors: Record<string, string> = {
+                  olx: "border-teal-300 bg-teal-50 text-teal-700 dark:border-teal-800 dark:bg-teal-950/40 dark:text-teal-300",
+                  vinted: "border-fuchsia-300 bg-fuchsia-50 text-fuchsia-700 dark:border-fuchsia-800 dark:bg-fuchsia-950/40 dark:text-fuchsia-300",
+                  kuantokusta: "border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300",
+                  amazon: "border-orange-300 bg-orange-50 text-orange-700 dark:border-orange-800 dark:bg-orange-950/40 dark:text-orange-300",
+                };
+                // Fallback search links, only used when the scraper
+                // couldn't capture a direct listing URL.
+                const platformSearchUrls: Record<string, (title: string) => string> = {
+                  olx: (t) => `https://www.olx.pt/q-${t.toLowerCase().replace(/\s+/g, "-")}`,
+                  vinted: (t) => `https://www.vinted.pt/catalog?search_text=${encodeURIComponent(t)}`,
+                  kuantokusta: (t) => `https://www.kuantokusta.pt/search?q=${encodeURIComponent(t)}`,
+                  amazon: (t) => `https://www.amazon.es/s?k=${encodeURIComponent(t)}`,
+                };
+                return (
+                  <div className="mt-3">
+                    <Collapsible>
+                      <div className="flex items-center gap-2">
+                        <CollapsibleTrigger asChild>
+                          <Button variant="outline" size="sm" className="w-full gap-1">
+                            <Globe className="h-3.5 w-3.5" />
+                            EU Market Links ({deduped.length})
+                            <ChevronDown className="ml-auto h-3.5 w-3.5" />
+                          </Button>
+                        </CollapsibleTrigger>
                       </div>
-                    </CollapsibleContent>
-                  </Collapsible>
-                </div>
-              );
-            })()}
+                      <CollapsibleContent className="mt-2">
+                        <div className="max-h-64 overflow-y-auto rounded-lg border">
+                          <UITable>
+                            <UITableHeader className="sticky top-0 bg-background">
+                              <UITableRow>
+                                <UITableHead className="w-16 p-2 text-[10px]">Source</UITableHead>
+                                <UITableHead className="p-2 text-[10px]">Title</UITableHead>
+                                <UITableHead className="text-right p-2 text-[10px]">€</UITableHead>
+                                <UITableHead className="w-10 p-2"></UITableHead>
+                              </UITableRow>
+                            </UITableHeader>
+                            <UITableBody>
+                              {deduped.slice(0, 50).map((c, i) => (
+                                <UITableRow key={`${c.platform}-${i}`}>
+                                  <UITableCell className="p-2">
+                                    <Badge variant="outline" className={`text-[9px] ${platformColors[c.platform] || ""}`}>
+                                      {c.platform === "kuantokusta" ? "KK" : c.platform === "amazon" ? "AMZ" : c.platform}
+                                    </Badge>
+                                  </UITableCell>
+                                  <UITableCell className="max-w-[120px] truncate p-2 text-[10px]" title={c.title}>
+                                    {c.title}
+                                  </UITableCell>
+                                  <UITableCell className="text-right p-2 text-[10px] font-medium tabular-nums">
+                                    €{c.priceEur}
+                                  </UITableCell>
+                                  <UITableCell className="p-2">
+                                    <a
+                                      href={c.url || platformSearchUrls[c.platform]?.(c.title) || "#"}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      title={c.url ? "Open listing" : "Search for listing"}
+                                      className="text-primary hover:underline"
+                                    >
+                                      <ExternalLink className="h-3 w-3" />
+                                    </a>
+                                  </UITableCell>
+                                </UITableRow>
+                              ))}
+                            </UITableBody>
+                          </UITable>
+                        </div>
+                      </CollapsibleContent>
+                    </Collapsible>
+                  </div>
+                );
+              })()}
+            </div>
           </aside>
           {/* Main content */}
           <div className="min-w-0 flex-1 space-y-5">
@@ -830,6 +927,7 @@ export default function Home() {
             }}
             scanning={scanning}
             paused={paused}
+            stopping={cancelling}
             query={query}
             setQuery={setQuery}
             category={category}
@@ -860,27 +958,11 @@ export default function Home() {
                     if (s < 60) return `${s}s`;
                     return `${Math.floor(s / 60)}m ${s % 60}s`;
                   };
-                  let estRemaining: number | null = null;
-                  if (progress > 10 && progress < 100) {
-                    // Linear extrapolation: at 50% after 20s → total ~40s → 20s left.
-                    const naiveRemaining = scanElapsed / (progress / 100) - scanElapsed;
-                    if (etaRef.current === null) {
-                      // First real estimate — cap at 2× elapsed so it
-                      // doesn't start with an absurdly high number.
-                      etaRef.current = Math.min(naiveRemaining, scanElapsed * 2);
-                    } else {
-                      // Exponential moving average (α=0.3) to smooth
-                      // out progress jumps between steps.
-                      const alpha = 0.3;
-                      const smoothed = alpha * naiveRemaining + (1 - alpha) * etaRef.current;
-                      // Hard cap: ETA must never increase, only decrease.
-                      etaRef.current = Math.min(smoothed, Math.max(0, etaRef.current));
-                    }
-                    estRemaining = Math.max(0, Math.round(etaRef.current));
-                  } else if (progress <= 10 && scanElapsed > 3) {
-                    // Before scrapers report first progress, show a
-                    // conservative countdown (60s is a reasonable default).
-                    estRemaining = Math.max(0, Math.round(60 - scanElapsed));
+                  // Velocity-based estimate (won't grow while progress is
+                  // stalled); falls back to a fixed early-phase guess.
+                  let estRemaining: number | null = estimateRemaining(progress);
+                  if (estRemaining === null && progress < 10 && scanElapsed > 3) {
+                    estRemaining = Math.max(0, 40 - scanElapsed);
                   }
                   return (
                     <span className="flex items-center gap-1.5 rounded-full bg-muted/60 px-2.5 py-1 text-[11px] font-medium">
@@ -984,8 +1066,8 @@ export default function Home() {
               const currentStatus = status?.status ?? "";
               const steps = [
                 { key: "scraping_goofish", label: "Scrape Platforms", threshold: 0, icon: Search },
-                { key: "matching_eu", label: "Match EU Comps", threshold: 55, icon: Globe },
-                { key: "calculating", label: "Profit Calc", threshold: 72, icon: Calculator },
+                { key: "matching_eu", label: "Match EU Comps", threshold: 40, icon: Globe },
+                { key: "calculating", label: "Profit Calc", threshold: 60, icon: Calculator },
                 { key: "done", label: "Complete", threshold: 100, icon: CheckCircle2 },
               ];
               const activeStepIdx = steps.findIndex((s, i) => {
@@ -1100,7 +1182,9 @@ export default function Home() {
               // Aggregate all EU comps from all evaluated listings.
               // Dedupe by title+price so the same comp attached to multiple
               // Goofish listings isn't double-counted in the market preview.
-              const allComps = safeListings.flatMap((l) => ensureArray(l.euComps));
+              const allComps = safeListings.flatMap((l) =>
+                Array.isArray(l.euComps) ? l.euComps : []
+              );
               const seen = new Set<string>();
               const deduped = allComps.filter((c) => {
                 const key = `${c.platform}:${c.title}:${c.priceEur}`;
@@ -1274,47 +1358,23 @@ export default function Home() {
                   {/* ── New vs Used comparison ─────────────────────────── */}
                   {newMedian > 0 && usedMedian > 0 && (
                     <div className="flex flex-wrap items-center gap-3 rounded-lg border border-emerald-200 bg-emerald-50/40 px-3 py-2.5 dark:border-emerald-900 dark:bg-emerald-950/20">
-                      {newVsUsedDelta >= 0 ? (
-                        <>
-                          <div className="flex items-center gap-1.5">
-                            <ArrowDownRight className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
-                            <span className="text-xs font-semibold text-emerald-700 dark:text-emerald-300">
-                              Used is {usedDiscountPct}% cheaper than new
-                            </span>
-                          </div>
-                          <div className="flex items-baseline gap-1.5 text-xs tabular-nums">
-                            <span className="text-muted-foreground">New €{newMedian}</span>
-                            <ArrowRight className="h-3 w-3 text-muted-foreground" />
-                            <span className="font-semibold text-teal-600 dark:text-teal-400">Used €{usedMedian}</span>
-                            <span className="ml-1 rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
-                              −€{newVsUsedDelta}
-                            </span>
-                          </div>
-                          <span className="ml-auto text-[10px] text-muted-foreground">
-                            Buying second-hand saves ~€{newVsUsedDelta} vs retail on this product
-                          </span>
-                        </>
-                      ) : (
-                        <>
-                          <div className="flex items-center gap-1.5">
-                            <ArrowDownRight className="h-4 w-4 text-amber-600 dark:text-amber-400" />
-                            <span className="text-xs font-semibold text-amber-700 dark:text-amber-300">
-                              New is {Math.abs(usedDiscountPct)}% cheaper than used
-                            </span>
-                          </div>
-                          <div className="flex items-baseline gap-1.5 text-xs tabular-nums">
-                            <span className="text-muted-foreground">Used €{usedMedian}</span>
-                            <ArrowRight className="h-3 w-3 text-muted-foreground" />
-                            <span className="font-semibold text-sky-600 dark:text-sky-400">New €{newMedian}</span>
-                            <span className="ml-1 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-700 dark:bg-amber-950 dark:text-amber-300">
-                              −€{Math.abs(newVsUsedDelta)}
-                            </span>
-                          </div>
-                          <span className="ml-auto text-[10px] text-muted-foreground">
-                            Buying new saves ~€{Math.abs(newVsUsedDelta)} vs second-hand on this product
-                          </span>
-                        </>
-                      )}
+                      <div className="flex items-center gap-1.5">
+                        <ArrowDownRight className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                        <span className="text-xs font-semibold text-emerald-700 dark:text-emerald-300">
+                          Used is {usedDiscountPct}% cheaper than new
+                        </span>
+                      </div>
+                      <div className="flex items-baseline gap-1.5 text-xs tabular-nums">
+                        <span className="text-muted-foreground">New €{newMedian}</span>
+                        <ArrowRight className="h-3 w-3 text-muted-foreground" />
+                        <span className="font-semibold text-teal-600 dark:text-teal-400">Used €{usedMedian}</span>
+                        <span className="ml-1 rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
+                          −€{newVsUsedDelta}
+                        </span>
+                      </div>
+                      <span className="ml-auto text-[10px] text-muted-foreground">
+                        Buying second-hand saves ~€{newVsUsedDelta} vs retail on this product
+                      </span>
                     </div>
                   )}
 
@@ -1492,8 +1552,10 @@ export default function Home() {
                     size="sm"
                     onClick={() => {
                       if (taskId) {
+                        // Keep the current result visible while refreshing —
+                        // clearing it here would leave a blank screen if the
+                        // reload fails (e.g. server restart).
                         setScanning(true);
-                        setResult(null);
                         pollStatus(taskId);
                       }
                     }}
@@ -1552,7 +1614,7 @@ export default function Home() {
             The user can search for any product and see how its median
             Goofish price, EU resale price, and net profit have changed
             over time. Pre-fills with the current scan's query. */}
-        <ProductTrend defaultQuery={result?.query || query} refreshKey={historyRefreshKey} />
+        <ProductTrend defaultQuery={result?.query} />
           </div>
         </div>
       </main>
