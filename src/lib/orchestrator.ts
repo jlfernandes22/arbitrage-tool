@@ -273,10 +273,20 @@ async function runPipelineInner(taskId: string, gen: number): Promise<void> {
     const forexPromise = getCnyToEurRate(cfg.forex.cny_to_eur_rate);
     // ── Goofish (source listings) ──
     const goofishPromise = (async () => {
+      const minPrice = cfg.scraping.min_price_cny || 0;
+      const maxPrice = cfg.scraping.max_price_cny || 0;
+      const priceFilterInfo =
+        minPrice > 0 || maxPrice > 0
+          ? ` [Filter: ${minPrice > 0 ? `¥${minPrice} (~€${Math.round(minPrice * cfg.forex.cny_to_eur_rate)})` : "¥0"} - ${maxPrice > 0 ? `¥${maxPrice} (~€${Math.round(maxPrice * cfg.forex.cny_to_eur_rate)})` : "∞"}]`
+          : "";
+
       if (state.manualHtml && state.manualHtml.trim().length > 0) {
-        appendLog(taskId, "INFO", "[Goofish] Manual paste mode");
+        appendLog(taskId, "INFO", `[Goofish] Manual paste mode${priceFilterInfo}`);
         const { parseManualPasteHtml } = await import("@/lib/scrapers/goofish");
-        const parsed = parseManualPasteHtml(state.manualHtml, state.query);
+        const parsed = parseManualPasteHtml(state.manualHtml, state.query, {
+          minPriceCny: cfg.scraping.min_price_cny,
+          maxPriceCny: cfg.scraping.max_price_cny,
+        });
         appendLog(taskId, "SUCCESS", `[Goofish] ${parsed.length} listings from manual paste`);
         parsed.slice(0, 15).forEach((item, idx) => {
           const eur = Math.round(item.priceCny * 0.13 * 100) / 100;
@@ -287,7 +297,7 @@ async function runPipelineInner(taskId: string, gen: number): Promise<void> {
         siteProgress.goofish.count = parsed.length;
         return parsed;
       }
-      appendLog(taskId, "INFO", `[Goofish] Searching goofish.com for "${state.query}" (up to ${goofishPages} pages)…`);
+      appendLog(taskId, "INFO", `[Goofish] Searching goofish.com for "${state.query}" (up to ${goofishPages} pages)${priceFilterInfo}…`);
       const r = await scrapeGoofish(state.query, state.category, {
         minPriceCny: cfg.scraping.min_price_cny,
         maxPriceCny: cfg.scraping.max_price_cny,

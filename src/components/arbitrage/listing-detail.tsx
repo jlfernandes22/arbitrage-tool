@@ -516,7 +516,12 @@ export function ListingDetailDialog({
                 </div>
                 <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs sm:grid-cols-3">
                   {n.family && <Field k="Family" v={n.family} />}
-                  {n.storageGB && <Field k="Storage" v={`${n.storageGB}GB`} />}
+                  {n.storageGB && (
+                    <Field
+                      k="Storage"
+                      v={n.storageGB >= 1024 ? `${n.storageGB / 1024}TB` : `${n.storageGB}GB`}
+                    />
+                  )}
                   {n.color && <Field k="Color" v={n.color} />}
                   {n.batteryHealth && <Field k="Battery" v={`${n.batteryHealth}%`} />}
                   {n.chip && <Field k="Chip" v={n.chip} />}

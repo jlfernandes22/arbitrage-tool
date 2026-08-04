@@ -28,7 +28,10 @@ export interface GoofishScrapeResult {
   blocked?: boolean; // hard block — needs manual paste
   liveFetchStatus?: string; // human-readable status of the live fetch attempt
 }
-export function buildGoofishSearchUrl(query: string): string {
+export function buildGoofishSearchUrl(
+  query: string,
+  opts?: { minPriceCny?: number; maxPriceCny?: number },
+): string {
   // The spm parameter is REQUIRED for Goofish to return search results.
   // Without it, the page may render empty.
   // CRITICAL: Use the ORIGINAL English query, NOT a Chinese translation.
@@ -37,7 +40,14 @@ export function buildGoofishSearchUrl(query: string): string {
   // page. The English query (e.g. "iPhone 15 Pro 256GB") returns the full
   // 305KB page with 30 listings. Goofish search supports English queries
   // and returns the same Chinese-language listings.
-  return `${config.scraping.goofish_search_url}${encodeURIComponent(query)}&spm=a21ybx.search.searchInput.0`;
+  let url = `${config.scraping.goofish_search_url}${encodeURIComponent(query)}&spm=a21ybx.search.searchInput.0`;
+  if (opts?.minPriceCny && opts.minPriceCny > 0) {
+    url += `&minPrice=${opts.minPriceCny}&startPrice=${opts.minPriceCny}`;
+  }
+  if (opts?.maxPriceCny && opts.maxPriceCny > 0) {
+    url += `&maxPrice=${opts.maxPriceCny}&endPrice=${opts.maxPriceCny}`;
+  }
+  return url;
 }
 // ── Anti-Bot: Windows UA rotation ─────────────────────────────────────
 // Goofish's Baxia anti-bot can flag a user agent after detecting
@@ -288,7 +298,7 @@ async function scrapeGoofishLive(
     try {
       if (!ctx) break;
       page = await ctx.newPage();
-      const url = buildGoofishSearchUrl(query);
+      const url = buildGoofishSearchUrl(query, opts);
       await page.goto(url, { waitUntil: "domcontentloaded", timeout: 20000 });
       await page.waitForTimeout(3000);
     // Dismiss ALL login modal overlays and blocking dialogs (spec §2.1).
@@ -401,7 +411,11 @@ async function scrapeGoofishLive(
       // below ¥2000) — computed in Node and passed into the browser
       // context, since the page evaluate can't access Node imports.
       const categoryMinPriceCny = getMinPriceCny(category);
-      return await activePage.evaluate((minRealisticPrice) => {
+      const filterBounds = {
+        minPrice: minPriceCny > 0 ? minPriceCny : categoryMinPriceCny,
+        maxPrice: maxPriceCny > 0 ? maxPriceCny : 0,
+      };
+      return await activePage.evaluate((bounds) => {
         const results: Array<{
           title: string; priceText: string; description: string;
           imageUrl: string; href: string; location: string;
@@ -512,7 +526,7 @@ async function scrapeGoofishLive(
         // (¥500 for iPhones, ¥2000 for MacBooks, …). If a price is below it,
         // it's likely a recommended product (fruit juice ¥26, flower pots ¥5,
         // etc.) that slipped through.
-        const MIN_REALISTIC_PRICE = minRealisticPrice;
+        const MIN_REALISTIC_PRICE = bounds.minPrice;
 
         // ── POSITIONAL TITLE↔PRICE MATCHING ───────────────────────────
         // CRITICAL FIX: Goofish renders all listing cards under a shared
@@ -596,9 +610,10 @@ async function scrapeGoofishLive(
           }
 
           if (!priceText) return;
-          // PRICE SANITY CHECK
+          // PRICE SANITY & USER FILTER CHECK
           const priceNum = parseFloat(priceText);
-          if (priceNum < MIN_REALISTIC_PRICE) return;
+          if (bounds.minPrice > 0 && priceNum < bounds.minPrice) return;
+          if (bounds.maxPrice > 0 && priceNum > bounds.maxPrice) return;
 
           const cardText = card?.textContent?.replace(/\s+/g, " ").trim().substring(0, 500) || "";
           const imgEl = card?.querySelector("img");
@@ -626,7 +641,7 @@ async function scrapeGoofishLive(
           });
         });
         return results;
-      }, categoryMinPriceCny);
+      }, filterBounds);
     };
     // ─── PAGINATION + EXTRACTION LOOP ───────────────────────────────
     // Strategy per page (verified against Goofish's DOM):
@@ -798,6 +813,12 @@ async function scrapeGoofishLive(
     // every extracted card.
     const listings: GoofishListing[] = allRawListings
       .filter((r) => r.priceText && parseFloat(r.priceText.replace(/,/g, "")) > 0)
+      .filter((r) => {
+        const price = parseFloat(r.priceText.replace(/,/g, ""));
+        if (minPriceCny > 0 && price < minPriceCny) return false;
+        if (maxPriceCny > 0 && price > maxPriceCny) return false;
+        return true;
+      })
       .filter((r) => !isJunkListing(r.title))
       .filter((r) => isTitleRelevant(r.title))
       .map((r, i) => {
@@ -1246,40 +1267,63 @@ export async function scrapeGoofish(
  * Parse manually-pasted raw DOM HTML (manual paste mode resume).
  * Used when the Goofish scraper hits a hard CAPTCHA / WAF block.
  */
-export function parseManualPasteHtml(html: string, query: string): GoofishListing[] {
-  const parsed = parseGoofishHtml(html);
+export function parseManualPasteHtml(
+  html: string,
+  query: string,
+  opts?: { minPriceCny?: number; maxPriceCny?: number },
+): GoofishListing[] {
+  let parsed = parseGoofishHtml(html);
   // If structured parse found nothing, fall back to a looser extraction
   if (parsed.length === 0) {
-    // Heuristic: try to find listing-like blocks
-    const blockRegex =
-      /<[^>]*class="[^"]*item[^"]*"[^>]*>([\s\S]*?)<\/[^>]+>/gi;
-    let m: RegExpExecArray | null;
+    // Heuristic: try to find listing-like blocks by splitting on item/card markers
+    const cardSplits = html.split(/(?=<[^>]+class="[^"]*(?:item|card|search-result)[^"]*")/gi);
     let idx = 0;
-    while ((m = blockRegex.exec(html)) && idx < 50) {
-      const block = m[1];
-      const titleM = block.match(/<[^>]*>([^<]{4,120})<\/[^>]*>/);
-      const priceM = block.match(/¥\s*(\d+(?:\.\d+)?)/);
-      if (titleM && priceM) {
-        const title = titleM[1].trim();
-        const priceCny = parseFloat(priceM[1]);
-        const normalized = normalizeListing(title, block);
-        parsed.push({
-          id: `gf-manual-${idx}`,
-          title,
-          priceCny,
-          description: block.replace(/<[^>]+>/g, " ").slice(0, 500),
-          imageUrls: [],
-          sellerLocation: "未知",
-          wantsCount: 0,
-          sellerVerified: false,
-          sellerVerifiedTransactions: 0,
-          rawText: block.replace(/<[^>]+>/g, " "),
-          source: "goofish",
-          normalized,
-        });
-        idx++;
-      }
+    for (const chunk of cardSplits) {
+      if (idx >= 60) break;
+      const priceM = chunk.match(/¥\s*(\d[\d,]*(?:\.\d{1,2})?)/);
+      if (!priceM) continue;
+      const priceCny = parseFloat(priceM[1].replace(/,/g, ""));
+      if (isNaN(priceCny) || priceCny <= 0) continue;
+
+      // Extract title: first substantial text before or around price
+      const cleanText = chunk
+        .replace(/<script[\s\S]*?<\/script>/gi, "")
+        .replace(/<style[\s\S]*?<\/style>/gi, "")
+        .replace(/<[^>]+>/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+
+      const titleM =
+        chunk.match(/<[^>]+class="[^"]*(?:title|name|header)[^"]*"[^>]*>([^<]{4,120})<\/[^>]+>/i) ||
+        chunk.match(/<[^>]*>([^<]{4,120})<\/[^>]*>/);
+      const title = (titleM ? titleM[1].replace(/<[^>]+>/g, "") : cleanText).trim();
+      if (!title || title.length < 3) continue;
+
+      const normalized = normalizeListing(title, cleanText);
+      parsed.push({
+        id: `gf-manual-${idx}`,
+        title,
+        priceCny,
+        description: cleanText.slice(0, 500),
+        imageUrls: [],
+        sellerLocation: "未知",
+        wantsCount: 0,
+        sellerVerified: false,
+        sellerVerifiedTransactions: 0,
+        rawText: cleanText,
+        source: "goofish",
+        normalized,
+      });
+      idx++;
     }
   }
+
+  if (opts?.minPriceCny && opts.minPriceCny > 0) {
+    parsed = parsed.filter((item) => item.priceCny >= opts.minPriceCny!);
+  }
+  if (opts?.maxPriceCny && opts.maxPriceCny > 0) {
+    parsed = parsed.filter((item) => item.priceCny <= opts.maxPriceCny!);
+  }
+
   return parsed;
 }

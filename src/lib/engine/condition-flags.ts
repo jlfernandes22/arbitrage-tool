@@ -24,6 +24,7 @@
 //     Battery Not Replaced, No Water Damage, Unlocked, Never Opened).
 
 import type { GoofishListing } from "@/lib/engine/types";
+import { extractStorage, formatStorageGB } from "@/lib/engine/normalizer";
 
 export type ConditionVerdict = "positive" | "negated" | "none";
 
@@ -613,38 +614,38 @@ function detectCondition(text: string, spec: ConditionSpec): ConditionVerdict {
 }
 
 /** Extract "Battery Health N%" and "Charge Cycles N" from the text. */
-function extractBatteryStats(text: string): { health?: string; cycles?: string } {
-  let health: string | undefined;
-  let cycles: string | undefined;
+function extractBatteryStats(text: string): { health?: number; cycles?: number } {
+  let health: number | undefined;
+  let cycles: number | undefined;
   // 电池健康93% / 电池效率100 / 电池93 / battery health 92%
   const healthMatch = text.match(/电池[】】\[\]【]*\s*(?:健康|健康度|效率)?\s*[:：]?\s*(\d{1,3})\s*%?\s*(?:充电\s*(\d{1,4})\s*次)?/);
   if (healthMatch) {
     const n = parseInt(healthMatch[1], 10);
-    if (n >= 50 && n <= 100) health = `${n}%`;
+    if (n >= 50 && n <= 100) health = n;
     if (healthMatch[2]) {
       const c = parseInt(healthMatch[2], 10);
-      if (c >= 0 && c <= 2000) cycles = String(c);
+      if (c >= 0 && c <= 2000) cycles = c;
     }
   }
   const enHealth = text.match(/\bbattery\s+health\s*[:：]?\s*(\d{1,3})\s*%?/i)
     || text.match(/\bbattery\s*[:：]?\s*(\d{1,3})\s*%/i)
     || text.match(/\b(\d{1,3})\s*%\s+battery\s+health\b/i);
-  if (enHealth) {
+  if (enHealth && !health) {
     const n = parseInt(enHealth[1], 10);
-    if (n >= 50 && n <= 100) health = `${n}%`;
+    if (n >= 50 && n <= 100) health = n;
   }
   const enCycles = text.match(/\b(?:charge\s+)?cycles?\s*[:：]?\s*(\d{1,4})\b/i)
     || text.match(/\b(\d{1,4})\s+(?:charge\s+)?cycles?\b/i);
-  if (enCycles) {
+  if (enCycles && !cycles) {
     const c = parseInt(enCycles[1], 10);
-    if (c >= 0 && c <= 2000) cycles = String(c);
+    if (c >= 0 && c <= 2000) cycles = c;
   }
   // 充电88次 standalone
   if (!cycles) {
     const cnCycles = text.match(/充电\s*(\d{1,4})\s*次/);
     if (cnCycles) {
       const c = parseInt(cnCycles[1], 10);
-      if (c >= 0 && c <= 2000) cycles = String(c);
+      if (c >= 0 && c <= 2000) cycles = c;
     }
   }
   return { health, cycles };
@@ -675,6 +676,26 @@ export function detectConditionFlags(listing: GoofishListing): void {
     );
   }
 
+  // 0. DETECT STORAGE (e.g., 128GB, 256GB, 512GB, 1TB)
+  const storageGB =
+    listing.normalized?.storageGB ??
+    extractStorage(fullText)?.storageGB;
+  const storageFlag = storageGB ? formatStorageGB(storageGB) : null;
+
+  // Sync back to normalized product if missing
+  if (storageGB && listing.normalized) {
+    if (!listing.normalized.storageGB) {
+      listing.normalized.storageGB = storageGB;
+    }
+    if (
+      listing.normalized.family &&
+      !listing.normalized.standardKey.includes("GB") &&
+      !listing.normalized.standardKey.includes("TB")
+    ) {
+      listing.normalized.standardKey = `${listing.normalized.standardKey} ${formatStorageGB(storageGB)}`;
+    }
+  }
+
   // 1. BRAND NEW / FACTORY SEALED
   const isFactorySealed =
     /全新未拆|原封|未开封|未拆封|全新正品未拆|未激活|factory\s*sealed|brand\s*new\s*sealed/i.test(
@@ -683,6 +704,7 @@ export function detectConditionFlags(listing: GoofishListing): void {
 
   if (isFactorySealed) {
     flags.push("Factory Sealed");
+    if (storageFlag) flags.push(storageFlag);
     listing.conditionFlags = flags;
     return;
   }
@@ -764,12 +786,17 @@ export function detectConditionFlags(listing: GoofishListing): void {
     }
   }
 
-  // 3. PACKAGING / ACCESSORIES
+  // 3. STORAGE FLAG (e.g. 128GB, 256GB, 512GB, 1TB)
+  if (storageFlag) {
+    flags.push(storageFlag);
+  }
+
+  // 4. PACKAGING / ACCESSORIES
   if (!isFactorySealed && noBox === "positive") {
     flags.push("No Box");
   }
 
-  // 4. BATTERY STATS
+  // 5. BATTERY STATS
   const stats = extractBatteryStats(fullText);
   if (stats.health) flags.push(`Battery ${stats.health}%`);
   if (stats.cycles) flags.push(`Cycles ${stats.cycles}`);
@@ -782,17 +809,20 @@ export function detectConditionFlags(listing: GoofishListing): void {
  */
 export function getConditionFlagClasses(flag: string): string {
   if (/Factory Sealed|All Original|No Repairs|Original Screen|Original Battery|No Water Damage/i.test(flag)) {
-    return "bg-emerald-500/10 text-emerald-400 border-emerald-500/20";
+    return "border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300";
   }
   if (/Replaced|Opened|Repaired|Water Damage|Cracked|Leak|Burn-in|Swollen|Spots|Touch|Power|Face ID|Locked/i.test(flag)) {
-    return "bg-rose-500/10 text-rose-400 border-rose-500/20";
+    return "border-rose-300 bg-rose-50 text-rose-700 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-300";
   }
   if (/No Box|Unlocked/i.test(flag)) {
-    return "bg-amber-500/10 text-amber-400 border-amber-500/20";
+    return "border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300";
   }
   if (/Battery \d+|Cycles \d+/i.test(flag)) {
-    return "bg-sky-500/10 text-sky-400 border-sky-500/20";
+    return "border-sky-300 bg-sky-50 text-sky-700 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-300";
   }
-  return "bg-slate-500/10 text-slate-400 border-slate-500/20";
+  if (/^\d+\s*(?:GB|TB)$/i.test(flag)) {
+    return "border-indigo-300 bg-indigo-50 text-indigo-700 dark:border-indigo-800 dark:bg-indigo-950/40 dark:text-indigo-300";
+  }
+  return "border-slate-300 bg-slate-50 text-slate-700 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-300";
 }
 

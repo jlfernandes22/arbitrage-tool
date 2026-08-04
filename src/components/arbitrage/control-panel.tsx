@@ -34,6 +34,7 @@ import {
   CheckCircle2,
   X,
   Clock,
+  SlidersHorizontal,
 } from "lucide-react";
 import {
   type AppConfigOverrides,
@@ -681,40 +682,198 @@ export function ControlPanel({
           </div>
         )}
 
-        {/* ── Price filter row — always visible ────────────────────── */}
-        <div className="flex flex-wrap items-end gap-3 rounded-lg border border-dashed bg-muted/20 px-3 py-2.5">
-          <div className="flex items-end gap-2">
-            <div className="w-28 space-y-1.5">
-              <Label className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                Min Price ¥
-              </Label>
-              <Input
-                type="number"
-                value={minPriceCny || ""}
-                onChange={(e) => setMinPriceCny(parseInt(e.target.value) || 0)}
-                className="h-9 focus-visible:ring-emerald-500/40 focus-visible:ring-2"
-                placeholder="0"
-                min={0}
-              />
+        {/* ── Goofish Price Filter Section ────────────────────── */}
+        <div className="flex flex-col gap-3 rounded-xl border border-border/80 bg-gradient-to-br from-muted/30 via-muted/10 to-background p-3.5 shadow-xs">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <div className="flex h-6 w-6 items-center justify-center rounded-md bg-emerald-500/10 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400">
+                <SlidersHorizontal className="h-3.5 w-3.5" />
+              </div>
+              <div className="flex flex-col">
+                <span className="text-xs font-semibold text-foreground">
+                  Goofish Price Filter (Preço Mín / Máx)
+                </span>
+                <span className="text-[10px] text-muted-foreground">
+                  Filters out accessories/boxes and limits search to realistic device prices
+                </span>
+              </div>
             </div>
-            <span className="pb-2 text-xs text-muted-foreground">—</span>
-            <div className="w-28 space-y-1.5">
-              <Label className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                Max Price ¥
-              </Label>
-              <Input
-                type="number"
-                value={maxPriceCny || ""}
-                onChange={(e) => setMaxPriceCny(parseInt(e.target.value) || 0)}
-                className="h-9 focus-visible:ring-emerald-500/40 focus-visible:ring-2"
-                placeholder="0"
-                min={0}
-              />
+            {(minPriceCny > 0 || maxPriceCny > 0) && (
+              <div className="flex items-center gap-2">
+                <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-[10px] font-semibold text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300">
+                  ¥{minPriceCny.toLocaleString()} – {maxPriceCny > 0 ? `¥${maxPriceCny.toLocaleString()}` : "∞"}
+                  {" "}(~€{Math.round(minPriceCny * cnyToEur)} – {maxPriceCny > 0 ? `€${Math.round(maxPriceCny * cnyToEur)}` : "∞"})
+                </span>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setMinPriceCny(0);
+                    setMaxPriceCny(0);
+                  }}
+                  className="h-6 px-1.5 text-[10px] text-muted-foreground hover:text-foreground"
+                >
+                  <X className="h-3 w-3 mr-0.5" />
+                  Clear
+                </Button>
+              </div>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {/* Min Price CNY */}
+            <div className="space-y-1.5 rounded-lg border border-border/60 bg-background/60 p-2.5">
+              <div className="flex items-center justify-between">
+                <Label htmlFor="min-price-cny" className="text-[11px] font-semibold text-foreground">
+                  Min Price ¥ (Mínimo)
+                </Label>
+                {minPriceCny > 0 && (
+                  <span className="text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
+                    ≈ €{(minPriceCny * cnyToEur).toFixed(0)} EUR
+                  </span>
+                )}
+              </div>
+              <div className="relative">
+                <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-xs font-bold text-muted-foreground">
+                  ¥
+                </span>
+                <Input
+                  id="min-price-cny"
+                  type="number"
+                  value={minPriceCny || ""}
+                  onChange={(e) => setMinPriceCny(Math.max(0, parseInt(e.target.value) || 0))}
+                  className="h-9 pl-7 text-xs font-medium focus-visible:ring-emerald-500/40 focus-visible:ring-2"
+                  placeholder="0 (no minimum)"
+                  min={0}
+                />
+              </div>
+            </div>
+
+            {/* Max Price CNY */}
+            <div className="space-y-1.5 rounded-lg border border-border/60 bg-background/60 p-2.5">
+              <div className="flex items-center justify-between">
+                <Label htmlFor="max-price-cny" className="text-[11px] font-semibold text-foreground">
+                  Max Price ¥ (Máximo)
+                </Label>
+                {maxPriceCny > 0 && (
+                  <span className="text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
+                    ≈ €{(maxPriceCny * cnyToEur).toFixed(0)} EUR
+                  </span>
+                )}
+              </div>
+              <div className="relative">
+                <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-xs font-bold text-muted-foreground">
+                  ¥
+                </span>
+                <Input
+                  id="max-price-cny"
+                  type="number"
+                  value={maxPriceCny || ""}
+                  onChange={(e) => setMaxPriceCny(Math.max(0, parseInt(e.target.value) || 0))}
+                  className="h-9 pl-7 text-xs font-medium focus-visible:ring-emerald-500/40 focus-visible:ring-2"
+                  placeholder="0 (no maximum)"
+                  min={0}
+                />
+              </div>
             </div>
           </div>
-          <p className="pb-2 text-[10px] text-muted-foreground">
-            Filters Goofish listings by CNY price range. 0 = no filter.
-          </p>
+
+          {/* Quick presets row */}
+          <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+            <span className="text-[10px] font-medium text-muted-foreground mr-1">
+              Quick Presets:
+            </span>
+            {(() => {
+              const presets = (() => {
+                switch (category) {
+                  case "iphone":
+                    return [
+                      { label: "🎯 Sweet Spot", desc: "¥2.5k - ¥5.5k", min: 2500, max: 5500 },
+                      { label: "💎 Pro / Max", desc: "¥3.5k - ¥7.5k", min: 3500, max: 7500 },
+                      { label: "🏷️ Budget Entry", desc: "¥1.2k - ¥3k", min: 1200, max: 3000 },
+                    ];
+                  case "macbook":
+                    return [
+                      { label: "🎯 Air / Entry", desc: "¥3k - ¥6.5k", min: 3000, max: 6500 },
+                      { label: "💎 Pro / Max", desc: "¥5.5k - ¥14k", min: 5500, max: 14000 },
+                    ];
+                  case "ipad":
+                    return [
+                      { label: "🎯 Air / Mini", desc: "¥1.5k - ¥3.8k", min: 1500, max: 3800 },
+                      { label: "💎 iPad Pro", desc: "¥3k - ¥7.5k", min: 3000, max: 7500 },
+                    ];
+                  case "ps5":
+                  case "gaming":
+                    return [
+                      { label: "🎯 Standard", desc: "¥1.5k - ¥3.2k", min: 1500, max: 3200 },
+                      { label: "💎 Bundle / Pro", desc: "¥2.5k - ¥5k", min: 2500, max: 5000 },
+                    ];
+                  case "applewatch":
+                    return [
+                      { label: "🎯 Series / SE", desc: "¥800 - ¥2.2k", min: 800, max: 2200 },
+                      { label: "💎 Ultra", desc: "¥2.5k - ¥5.5k", min: 2500, max: 5500 },
+                    ];
+                  case "dji":
+                    return [
+                      { label: "🎯 Mini / Air", desc: "¥1.8k - ¥4.5k", min: 1800, max: 4500 },
+                      { label: "💎 Mavic / Pro", desc: "¥4.5k - ¥12k", min: 4500, max: 12000 },
+                    ];
+                  case "samsung":
+                  case "xiaomi":
+                    return [
+                      { label: "🎯 Mainstream", desc: "¥1.5k - ¥4k", min: 1500, max: 4000 },
+                      { label: "💎 Ultra / Flagship", desc: "¥3.5k - ¥7k", min: 3500, max: 7000 },
+                    ];
+                  default:
+                    return [
+                      { label: "🎯 Target Range", desc: "¥1.5k - ¥5k", min: 1500, max: 5000 },
+                      { label: "💎 Premium", desc: "¥4k - ¥10k", min: 4000, max: 10000 },
+                    ];
+                }
+              })();
+
+              return presets.map((preset) => {
+                const isActive = minPriceCny === preset.min && maxPriceCny === preset.max;
+                return (
+                  <button
+                    key={preset.label}
+                    type="button"
+                    onClick={() => {
+                      if (isActive) {
+                        setMinPriceCny(0);
+                        setMaxPriceCny(0);
+                      } else {
+                        setMinPriceCny(preset.min);
+                        setMaxPriceCny(preset.max);
+                      }
+                    }}
+                    className={`inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-[11px] font-medium transition-all ${
+                      isActive
+                        ? "border-emerald-400 bg-emerald-50 text-emerald-700 dark:border-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300 shadow-xs"
+                        : "border-border/70 bg-background text-muted-foreground hover:border-emerald-300 hover:bg-emerald-50/40 hover:text-emerald-700 dark:hover:border-emerald-800 dark:hover:bg-emerald-950/30"
+                    }`}
+                  >
+                    <span>{preset.label}</span>
+                    <span className="text-[9px] opacity-75">({preset.desc})</span>
+                  </button>
+                );
+              });
+            })()}
+            {(minPriceCny > 0 || maxPriceCny > 0) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setMinPriceCny(0);
+                  setMaxPriceCny(0);
+                }}
+                className="inline-flex items-center gap-0.5 rounded-md border border-border/70 bg-background px-2 py-1 text-[10px] font-medium text-muted-foreground hover:text-foreground"
+              >
+                <RotateCcw className="h-2.5 w-2.5 mr-0.5" />
+                Reset
+              </button>
+            )}
+          </div>
         </div>
 
         {/* ── Scraping Options: enrichment + skip toggles ──────────────

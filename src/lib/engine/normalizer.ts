@@ -316,29 +316,64 @@ export function displayTitle(raw: string): string {
   s = s.replace(/(\d{1,2})T(?!B)(?!\d)/g, "$1TB");
   return s;
 }
-function extractStorage(text: string): { storageGB: number; raw: string } | null {
-  const tb = text.match(TB_REGEX);
+export function formatStorageGB(storageGB: number): string {
+  if (storageGB >= 1024 && storageGB % 1024 === 0) {
+    return `${storageGB / 1024}TB`;
+  }
+  return `${storageGB}GB`;
+}
+
+export function extractStorage(text: string): { storageGB: number; raw: string } | null {
+  // 1. Explicit TB patterns (e.g. "1TB", "2TB", "1T", "2T", "容量: 1T", "1 TB")
+  const tbSpec = text.match(/(?:容量|机身内存|机身存储|存储容量|存储|版本)\s*[:：]?\s*(\d{1,2})\s*(?:TB|T)\b/i);
+  if (tbSpec) {
+    const tbVal = parseInt(tbSpec[1], 10);
+    if (tbVal >= 1 && tbVal <= 16) {
+      return { storageGB: tbVal * 1024, raw: `${tbVal}TB` };
+    }
+  }
+  const tb = text.match(/\b([1-9]|1[0-6])\s*(?:TB|T)\b/i) || text.match(/(?:^|\s|[^\da-zA-Z])([1-9]|1[0-6])\s*(?:TB|T)(?:[^\da-zA-Z]|$)/i);
   if (tb) {
     const tbVal = parseInt(tb[1], 10);
-    const gbVal = tbVal * 1024;
-    return { storageGB: gbVal, raw: `${tbVal}TB` };
+    if (tbVal >= 1 && tbVal <= 16) {
+      return { storageGB: tbVal * 1024, raw: `${tbVal}TB` };
+    }
   }
+
+  // 2. RAM + Storage combos like "12+256G", "16+512G", "8G+128G", "12GB+256GB"
+  const combo = text.match(/\b\d{1,2}\s*(?:G|GB)?\s*\+\s*(\d{2,4})\s*(?:GB|G)?\b/i);
+  if (combo) {
+    const val = parseInt(combo[1], 10);
+    if (val >= 16 && val <= 2048) {
+      return { storageGB: val, raw: formatStorageGB(val) };
+    }
+  }
+
+  // 3. Explicit spec attribute prefix: 容量: 256G, 存储容量: 512GB, 机身内存: 128G
+  const specMatch = text.match(/(?:容量|机身内存|机身存储|存储容量|存储|版本)\s*[:：]?\s*(\d{2,4})\s*(?:GB|G)?\b/i);
+  if (specMatch) {
+    const val = parseInt(specMatch[1], 10);
+    if (val >= 16 && val <= 2048) {
+      return { storageGB: val, raw: formatStorageGB(val) };
+    }
+  }
+
+  // 4. Standard GB regex: "256GB", "256G", "128 GB", "512gb"
   const m = text.match(STORAGE_REGEX);
   if (m) {
     const val = parseInt(m[1], 10);
-    if (val >= 8 && val <= 1024) {
-      return { storageGB: val, raw: `${val}GB` };
+    if (val >= 16 && val <= 2048) {
+      return { storageGB: val, raw: formatStorageGB(val) };
     }
   }
-  // Bare-number fallback: sellers often write "iPhone 15 Pro 256" without a
-  // unit. Only accept common phone/tablet storage sizes to avoid false positives
-  // (e.g., "15 Pro 2024" → 2024 is a year, not storage).
-  const COMMON_SIZES = new Set([32, 64, 128, 256, 512, 1024]);
+
+  // 5. Bare-number fallback: "iPhone 15 Pro 256", "iPad Air 5 64"
+  const COMMON_SIZES = new Set([16, 32, 64, 128, 256, 512, 1024, 2048]);
   const bare = text.match(BARE_STORAGE_REGEX);
   if (bare) {
     const val = parseInt(bare[1], 10);
     if (COMMON_SIZES.has(val)) {
-      return { storageGB: val, raw: `${val}GB` };
+      return { storageGB: val, raw: formatStorageGB(val) };
     }
   }
   return null;

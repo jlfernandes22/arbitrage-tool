@@ -2,6 +2,7 @@
 // Cross-Border Matching Engine — builds EU marketplace queries from
 // normalized products and scores EU comps against them.
 import type { EuMarketComp, NormalizedProduct } from "./types";
+import { extractStorage } from "./normalizer";
 /**
  * Build a clean European search query from a normalized product.
  * Produces the string used to query OLX / Vinted / KuantoKusta / Amazon.
@@ -79,15 +80,16 @@ export function scoreEuComp(comp: EuMarketComp, product: NormalizedProduct): num
       score += 25;
     }
   }
-  // Storage match (with and without space before "gb")
-  if (product.storageGB && (title.includes(`${product.storageGB}gb`) || title.includes(`${product.storageGB} gb`))) {
-    score += 15;
-  }
-  // Penalty for clearly different storage
+  // Storage evaluation: exact match gets a strong boost (+25), mismatch is penalized
   if (product.storageGB) {
-    const otherStorage = title.match(/(\d{2,4})\s*gb/i);
-    if (otherStorage && parseInt(otherStorage[1], 10) !== product.storageGB) {
-      score -= 20;
+    const compStorage = extractStorage(comp.title)?.storageGB;
+    if (compStorage) {
+      if (compStorage === product.storageGB) {
+        score += 25;
+      } else {
+        const ratio = Math.max(compStorage, product.storageGB) / Math.min(compStorage, product.storageGB);
+        score -= ratio >= 4 ? 30 : 20;
+      }
     }
   }
   return Math.max(0, Math.min(100, Math.round(score)));
