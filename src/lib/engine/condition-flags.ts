@@ -653,10 +653,17 @@ function extractBatteryStats(text: string): { health?: string; cycles?: string }
 /**
  * Detect condition flags and attach them to the listing. Mutates the
  * listing's conditionFlags array.
+ *
+ * Rules:
+ * 1. Factory Sealed suppresses "No Box", "Never Opened", "No Repairs", etc.
+ * 2. If any component was replaced/repaired, "Never Opened" and "All Original" are strictly forbidden.
+ * 3. Individual negation declarations ("Original Screen", "Original Battery", "No Repairs") are only shown when consistent.
+ * 4. "All Original" consolidates redundant declarations.
  */
 export function detectConditionFlags(listing: GoofishListing): void {
   let fullText = `${listing.title} ${listing.description}`;
   const flags: string[] = [];
+
   // Warranty clauses ("人为损坏/进水/屏幕/不在保修范围内") list conditions
   // that are NOT covered by warranty — they are not statements about this
   // device. Mask only the listed items (and the phrase up to the warranty
@@ -666,6 +673,18 @@ export function detectConditionFlags(listing: GoofishListing): void {
       /(?:人为损坏|进水|进过水|泡水|泡过水|浸水|碎屏|屏幕碎|屏裂|裂纹|裂痕|漏液|摔碎|屏幕破损|屏破)[^。；\n]{0,25}?(?:不在保修范围内|保修范围外|不保修)/g,
       " ",
     );
+  }
+
+  // 1. BRAND NEW / FACTORY SEALED
+  const isFactorySealed =
+    /全新未拆|原封|未开封|未拆封|全新正品未拆|未激活|factory\s*sealed|brand\s*new\s*sealed/i.test(
+      fullText,
+    ) && !/拆封|已拆|后封|二手/i.test(fullText);
+
+  if (isFactorySealed) {
+    flags.push("Factory Sealed");
+    listing.conditionFlags = flags;
+    return;
   }
 
   const screen = detectCondition(fullText, SCREEN_REPLACED);
@@ -684,47 +703,96 @@ export function detectConditionFlags(listing: GoofishListing): void {
   const faceId = detectCondition(fullText, FACE_ID_BROKEN);
   const original = detectCondition(fullText, ALL_ORIGINAL);
 
-  const hasAnyRepair = screen === "positive" || battery === "positive" || repaired === "positive";
+  const hasAnyRepair =
+    screen === "positive" ||
+    battery === "positive" ||
+    repaired === "positive";
 
-  // Repair / replacement flags (mutually consistent with Never Opened)
+  const hasHardwareDefect =
+    water === "positive" ||
+    cracked === "positive" ||
+    leak === "positive" ||
+    burnIn === "positive" ||
+    swollen === "positive" ||
+    spots === "positive" ||
+    touch === "positive" ||
+    noPower === "positive" ||
+    faceId === "positive";
+
+  // 1. DEFECT & REPAIR FLAGS (Highest priority / ground truth)
   if (screen === "positive") flags.push("Screen Replaced");
-  else if (screen === "negated") flags.push("Screen Not Replaced");
   if (battery === "positive") flags.push("Battery Replaced");
-  else if (battery === "negated") flags.push("Battery Not Replaced");
-  if (repaired === "positive") {
-    flags.push("Opened/Repaired");
-  } else if (repaired === "negated" && !hasAnyRepair) {
-    flags.push("Never Opened");
-  }
+  if (repaired === "positive") flags.push("Opened/Repaired");
 
-  // Condition flags
   if (water === "positive") flags.push("Water Damage");
-  else if (water === "negated") flags.push("No Water Damage");
   if (cracked === "positive") flags.push("Cracked Screen");
   if (leak === "positive") flags.push("Screen Leak");
   if (burnIn === "positive") flags.push("Screen Burn-in");
-  if (locked === "positive") flags.push("Locked");
-  else if (locked === "negated") flags.push("Unlocked");
-  if (noBox === "positive") flags.push("No Box");
   if (swollen === "positive") flags.push("Battery Swollen");
   if (spots === "positive") flags.push("Screen Spots");
   if (touch === "positive") flags.push("Touch Issues");
   if (noPower === "positive") flags.push("Won't Power On");
   if (faceId === "positive") flags.push("Face ID Broken");
 
-  // Battery stats
-  const stats = extractBatteryStats(fullText);
-  if (stats.health) flags.push(`Battery Health ${stats.health}`);
-  if (stats.cycles) flags.push(`Charge Cycles ${stats.cycles}`);
+  if (locked === "positive") flags.push("Locked");
+  else if (locked === "negated") flags.push("Unlocked");
 
-  // Originality — only when NO repairs/replacements were detected
-  if (original === "positive" && !hasAnyRepair) {
-    if (/全原|全原装|无修无换|无换无修|原装无修|原装无换|全原无修|原装未修|无拆修无换|all\s+original|fully\s+original/i.test(fullText)) {
-      flags.push("All Original");
-    } else {
-      flags.push("Original");
+  // 2. TRUST / ORIGINALITY FLAGS (Only valid if NOT contradicted by repairs)
+  const isAllOriginal =
+    !hasAnyRepair &&
+    !hasHardwareDefect &&
+    (original === "positive" ||
+      /全原|全原装|无修无换|无换无修|原装无修|原装无换|全原无修|原装未修|无拆修无换|all\s+original|fully\s+original/i.test(
+        fullText,
+      ));
+
+  if (isAllOriginal) {
+    flags.push("All Original");
+  } else if (!isFactorySealed) {
+    // If not All Original, show individual trust declarations if explicitly stated
+    if (repaired === "negated" && !hasAnyRepair) {
+      flags.push("No Repairs");
+    }
+    if (screen === "negated") {
+      flags.push("Original Screen");
+    }
+    if (battery === "negated") {
+      flags.push("Original Battery");
+    }
+    if (water === "negated" && !hasHardwareDefect) {
+      flags.push("No Water Damage");
     }
   }
 
+  // 3. PACKAGING / ACCESSORIES
+  if (!isFactorySealed && noBox === "positive") {
+    flags.push("No Box");
+  }
+
+  // 4. BATTERY STATS
+  const stats = extractBatteryStats(fullText);
+  if (stats.health) flags.push(`Battery ${stats.health}%`);
+  if (stats.cycles) flags.push(`Cycles ${stats.cycles}`);
+
   listing.conditionFlags = flags;
 }
+
+/**
+ * Returns Tailwind CSS badge classes for a given condition flag.
+ */
+export function getConditionFlagClasses(flag: string): string {
+  if (/Factory Sealed|All Original|No Repairs|Original Screen|Original Battery|No Water Damage/i.test(flag)) {
+    return "bg-emerald-500/10 text-emerald-400 border-emerald-500/20";
+  }
+  if (/Replaced|Opened|Repaired|Water Damage|Cracked|Leak|Burn-in|Swollen|Spots|Touch|Power|Face ID|Locked/i.test(flag)) {
+    return "bg-rose-500/10 text-rose-400 border-rose-500/20";
+  }
+  if (/No Box|Unlocked/i.test(flag)) {
+    return "bg-amber-500/10 text-amber-400 border-amber-500/20";
+  }
+  if (/Battery \d+|Cycles \d+/i.test(flag)) {
+    return "bg-sky-500/10 text-sky-400 border-sky-500/20";
+  }
+  return "bg-slate-500/10 text-slate-400 border-slate-500/20";
+}
+

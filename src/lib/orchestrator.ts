@@ -205,6 +205,25 @@ async function runPipelineInner(taskId: string, gen: number): Promise<void> {
       skipAmazon ? "Amazon" : null,
     ].filter(Boolean).join(", ") || "none";
     appendLog(taskId, "INFO", `[Config] Pages — Goofish: ${goofishPages}, OLX: ${skipOlx ? "skipped" : olxPages}, Vinted: ${skipVinted ? "skipped" : vintedPages}, KuantoKusta: ${skipKk ? "skipped" : kkPages}, Amazon: ${skipAmazon ? "skipped" : amazonPages} | Skipped: ${skippedSites}`);
+
+    // ── Factual pipeline duration estimation ──
+    const isManual = Boolean(state.manualHtml && state.manualHtml.trim().length > 0);
+    const activeScrapersCount = [!isManual, !skipOlx, !skipVinted, !skipKk, !skipAmazon].filter(Boolean).length;
+    const maxActivePages = Math.max(
+      !isManual ? goofishPages : 0,
+      !skipOlx ? olxPages : 0,
+      !skipVinted ? vintedPages : 0,
+      !skipKk ? kkPages : 0,
+      !skipAmazon ? amazonPages : 0,
+      1,
+    );
+    const estimatedSec = isManual
+      ? Math.max(6, activeScrapersCount * 2 + 4)
+      : Math.max(12, Math.round(maxActivePages * 4.5 + (cfg.scraping.enrich_all ? 6 : 2) + 6));
+
+    patch({ estimatedSec });
+    appendLog(taskId, "INFO", `[Pipeline] Estimated scan time: ~${estimatedSec}s (${isManual ? "Manual Paste" : `${maxActivePages} page(s)`} + active EU scrapers)`);
+
     const stepLabel = (() => {
       const active: string[] = ["Goofish"];
       if (!skipOlx) active.push("OLX");
@@ -259,6 +278,11 @@ async function runPipelineInner(taskId: string, gen: number): Promise<void> {
         const { parseManualPasteHtml } = await import("@/lib/scrapers/goofish");
         const parsed = parseManualPasteHtml(state.manualHtml, state.query);
         appendLog(taskId, "SUCCESS", `[Goofish] ${parsed.length} listings from manual paste`);
+        parsed.slice(0, 15).forEach((item, idx) => {
+          const eur = Math.round(item.priceCny * 0.13 * 100) / 100;
+          const flagText = item.conditionFlags && item.conditionFlags.length > 0 ? ` [Flags: ${item.conditionFlags.join(", ")}]` : "";
+          appendLog(taskId, "INFO", `[Goofish] #${idx + 1} ${item.title.slice(0, 50)} — ¥${item.priceCny.toFixed(2)} (${eur.toFixed(2)} €)${flagText}`);
+        });
         siteProgress.goofish.status = "done";
         siteProgress.goofish.count = parsed.length;
         return parsed;
@@ -274,6 +298,11 @@ async function runPipelineInner(taskId: string, gen: number): Promise<void> {
       if (r.liveFetchStatus) appendLog(taskId, "INFO", `[Goofish] ${r.liveFetchStatus}`);
       if (r.degraded) degraded = true;
       appendLog(taskId, "SUCCESS", `[Goofish] ${r.listings.length} listings acquired`);
+      r.listings.slice(0, 15).forEach((item, idx) => {
+        const eur = Math.round(item.priceCny * 0.13 * 100) / 100;
+        const flagText = item.conditionFlags && item.conditionFlags.length > 0 ? ` [Flags: ${item.conditionFlags.join(", ")}]` : "";
+        appendLog(taskId, "INFO", `[Goofish] #${idx + 1} ${item.title.slice(0, 50)} — ¥${item.priceCny.toFixed(2)} (${eur.toFixed(2)} €)${flagText}`);
+      });
       siteProgress.goofish.status = "done";
       siteProgress.goofish.count = r.listings.length;
       return r.listings;
@@ -286,6 +315,9 @@ async function runPipelineInner(taskId: string, gen: number): Promise<void> {
           const r = await scrapeOlx(null, state.query, { maxPages: olxPages });
           if (r.liveFetchStatus) appendLog(taskId, "INFO", `[OLX] ${r.liveFetchStatus}`);
           appendLog(taskId, "SUCCESS", `[OLX] ${r.comps.length} comps acquired`);
+          r.comps.slice(0, 10).forEach((comp, idx) => {
+            appendLog(taskId, "INFO", `[OLX] Comp #${idx + 1}: ${comp.title.slice(0, 50)} — ${comp.priceEur.toFixed(2)} €`);
+          });
           if (r.warning) warnings.push(`OLX: ${r.warning}`);
           if (r.degraded) degraded = true;
           siteProgress.olx.status = "done";
@@ -303,6 +335,9 @@ async function runPipelineInner(taskId: string, gen: number): Promise<void> {
           const r = await scrapeVinted(null, state.query, { maxPages: vintedPages });
           if (r.liveFetchStatus) appendLog(taskId, "INFO", `[Vinted] ${r.liveFetchStatus}`);
           appendLog(taskId, "SUCCESS", `[Vinted] ${r.comps.length} comps acquired`);
+          r.comps.slice(0, 10).forEach((comp, idx) => {
+            appendLog(taskId, "INFO", `[Vinted] Comp #${idx + 1}: ${comp.title.slice(0, 50)} — ${comp.priceEur.toFixed(2)} €`);
+          });
           if (r.warning) warnings.push(`Vinted: ${r.warning}`);
           if (r.degraded) degraded = true;
           siteProgress.vinted.status = "done";
@@ -324,6 +359,9 @@ async function runPipelineInner(taskId: string, gen: number): Promise<void> {
           const r = await scrapeKuantokusta(null, state.query, { maxPages: kkPages });
           if (r.liveFetchStatus) appendLog(taskId, "INFO", `[KuantoKusta] ${r.liveFetchStatus}`);
           appendLog(taskId, "SUCCESS", `[KuantoKusta] ${r.comps.length} NEW retail comps acquired`);
+          r.comps.slice(0, 10).forEach((comp, idx) => {
+            appendLog(taskId, "INFO", `[KuantoKusta] Comp #${idx + 1}: ${comp.title.slice(0, 50)} — ${comp.priceEur.toFixed(2)} €`);
+          });
           if (r.warning) warnings.push(`KuantoKusta: ${r.warning}`);
           if (r.degraded) degraded = true;
           siteProgress.kk.status = "done";
@@ -344,6 +382,9 @@ async function runPipelineInner(taskId: string, gen: number): Promise<void> {
           const r = await scrapeAmazon(null, state.query, { maxPages: amazonPages });
           if (r.liveFetchStatus) appendLog(taskId, "INFO", `[Amazon] ${r.liveFetchStatus}`);
           appendLog(taskId, "SUCCESS", `[Amazon] ${r.comps.length} NEW retail comps acquired`);
+          r.comps.slice(0, 10).forEach((comp, idx) => {
+            appendLog(taskId, "INFO", `[Amazon] Comp #${idx + 1}: ${comp.title.slice(0, 50)} — ${comp.priceEur.toFixed(2)} €`);
+          });
           if (r.warning) warnings.push(`Amazon: ${r.warning}`);
           if (r.degraded) degraded = true;
           siteProgress.amazon.status = "done";

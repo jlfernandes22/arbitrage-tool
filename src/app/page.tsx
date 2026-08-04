@@ -115,33 +115,12 @@ export default function Home() {
   // elapsed time and estimate remaining time based on progress.
   const scanStartedAtRef = useRef<number | null>(null);
   const [scanElapsed, setScanElapsed] = useState<number>(0);
-  // ── ETA tracking ──────────────────────────────────────────────────────
-  // The naive elapsed/progress extrapolation grows forever whenever progress
-  // stalls (e.g. a slow scraper pinned at a checkpoint), making the "est.
-  // left" number climb without bound. Instead we sample (timestamp, progress)
-  // on every poll and derive the remaining time from the RATE of progress
-  // over the last window. When progress isn't advancing, no ETA is shown.
-  const progressSamplesRef = useRef<Array<{ t: number; p: number }>>([]);
-  const estimateRemaining = useCallback((progress: number): number | null => {
+  const estimateRemaining = useCallback((progress: number, targetSec?: number): number | null => {
     if (progress >= 100) return 0;
-    if (progress < 5) return null; // too early for a reliable rate
-    const samples = progressSamplesRef.current;
-    const now = Date.now();
-    const cutoff = now - 45000;
-    const recent = samples.filter((s) => s.t >= cutoff);
-    if (recent.length >= 2) {
-      const first = recent[0];
-      const last = recent[recent.length - 1];
-      const dtSec = (last.t - first.t) / 1000;
-      const dp = last.p - first.p;
-      if (dtSec > 3 && dp > 0.4) {
-        const rate = dp / dtSec; // progress % per second
-        const remaining = (100 - last.p) / rate;
-        if (remaining > 0) return Math.min(Math.round(remaining), 900); // cap 15 min
-      }
-    }
-    return null; // stalled or too few samples — don't show a runaway ETA
-  }, []);
+    if (!targetSec || targetSec <= 0) return null;
+    const remaining = Math.max(1, targetSec - scanElapsed);
+    return remaining;
+  }, [scanElapsed]);
   // Tracks whether the component is mounted to prevent setState after unmount
   // (e.g. if a fetch resolves after navigation away).
   const mountedRef = useRef(true);
@@ -551,22 +530,7 @@ export default function Home() {
     }, 1000);
     return () => clearInterval(interval);
   }, [scanning]);
-  // ── Record progress samples for the velocity-based ETA ───────────────
-  // Every status poll appends a (timestamp, progress) sample and prunes
-  // anything older than the 45s window used by estimateRemaining().
-  useEffect(() => {
-    if (!scanning || !status) return;
-    const samples = progressSamplesRef.current;
-    const t = Date.now();
-    samples.push({ t, p: status.progress ?? 0 });
-    const cutoff = t - 45000;
-    while (samples.length > 0 && samples[0].t < cutoff) samples.shift();
-    if (samples.length > 120) samples.shift();
-  }, [status, scanning]);
-  // Reset the sample buffer when a new scan starts
-  useEffect(() => {
-    if (scanning) progressSamplesRef.current = [];
-  }, [scanning]);
+
   // ── Filtered listings for export ────────────────────────────────────
   // When a card filter or heatmap cell filter is active, CSV/JSON export
   // should respect it so the exported file matches what the user sees.
@@ -954,26 +918,31 @@ export default function Home() {
               <div className="flex items-center gap-3 tabular-nums text-muted-foreground">
                 {scanning && scanElapsed > 0 && (() => {
                   const progress = status?.progress ?? 0;
+                  const targetSec = status?.estimated_sec;
                   const fmt = (s: number) => {
                     if (s < 60) return `${s}s`;
                     return `${Math.floor(s / 60)}m ${s % 60}s`;
                   };
-                  // Velocity-based estimate (won't grow while progress is
-                  // stalled); falls back to a fixed early-phase guess.
-                  let estRemaining: number | null = estimateRemaining(progress);
-                  if (estRemaining === null && progress < 10 && scanElapsed > 3) {
-                    estRemaining = Math.max(0, 40 - scanElapsed);
-                  }
+                  const estRemaining: number | null = estimateRemaining(progress, targetSec);
                   return (
                     <span className="flex items-center gap-1.5 rounded-full bg-muted/60 px-2.5 py-1 text-[11px] font-medium">
                       <Clock className="h-3 w-3 text-primary" />
                       <span>{fmt(scanElapsed)}</span>
                       {estRemaining !== null && estRemaining > 0 && (
-                        <span className="text-muted-foreground/70">· est. {fmt(estRemaining)} left</span>
+                        <span className="text-muted-foreground/70">· ~{fmt(estRemaining)} left</span>
+                      )}
+                      {targetSec && (
+                        <span className="text-muted-foreground/50 text-[10px]">(est. total ~{targetSec}s)</span>
                       )}
                     </span>
                   );
                 })()}
+                {!scanning && status?.status === "done" && scanElapsed > 0 && (
+                  <span className="flex items-center gap-1.5 rounded-full bg-emerald-500/10 text-emerald-400 px-2.5 py-1 text-[11px] font-medium">
+                    <Clock className="h-3 w-3" />
+                    <span>Completed in {scanElapsed}s</span>
+                  </span>
+                )}
                 <span className="text-xs font-bold text-foreground bg-primary/10 px-2 py-0.5 rounded-full">{status?.progress ?? 0}%</span>
               </div>
             </div>

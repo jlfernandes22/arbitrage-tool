@@ -155,6 +155,7 @@ export interface TaskStatusResponse {
   started_at: string;
   finished_at: string | null;
   logs: LogEntry[];
+  estimated_sec?: number;
 }
 export type LogLevel = "INFO" | "WARN" | "ERROR" | "SUCCESS";
 export interface LogEntry {

@@ -23,21 +23,59 @@ function formatTime(ts: number): string {
     second: "2-digit",
   });
 }
+function renderLogContent(msg: string) {
+  const match = msg.match(/^(\[[^\]]+\])\s*(.*)$/);
+  if (!match) {
+    return <span className="text-slate-200">{msg}</span>;
+  }
+  const tag = match[1];
+  const rest = match[2];
+
+  let tagStyle = "bg-slate-800 text-slate-300 border-slate-700";
+  if (tag.includes("Goofish")) {
+    tagStyle = "bg-amber-500/20 text-amber-300 border-amber-500/30";
+  } else if (tag.includes("OLX")) {
+    tagStyle = "bg-teal-500/20 text-teal-300 border-teal-500/30";
+  } else if (tag.includes("Vinted")) {
+    tagStyle = "bg-cyan-500/20 text-cyan-300 border-cyan-500/30";
+  } else if (tag.includes("KuantoKusta")) {
+    tagStyle = "bg-blue-500/20 text-blue-300 border-blue-500/30";
+  } else if (tag.includes("Amazon")) {
+    tagStyle = "bg-orange-500/20 text-orange-300 border-orange-500/30";
+  } else if (tag.includes("Config") || tag.includes("Pipeline")) {
+    tagStyle = "bg-purple-500/20 text-purple-300 border-purple-500/30";
+  } else if (tag.includes("Forex")) {
+    tagStyle = "bg-emerald-500/20 text-emerald-300 border-emerald-500/30";
+  }
+
+  return (
+    <span className="inline-flex items-baseline gap-1.5">
+      <span className={`inline-block rounded border px-1 py-0.5 text-[10px] font-semibold uppercase leading-none tracking-wide ${tagStyle}`}>
+        {tag.slice(1, -1)}
+      </span>
+      <span className="text-slate-200">{rest}</span>
+    </span>
+  );
+}
+
 export function TerminalConsole({ logs, onClear, active }: TerminalConsoleProps) {
   // Defensive guard: ensure logs is always a real array.
   // If the API returns a plain object (DB corruption), fall back to [].
   const safeLogs = Array.isArray(logs) ? logs : [];
   const scrollRef = useRef<HTMLDivElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
+
   // Auto-scroll to bottom when new logs arrive
   useEffect(() => {
     if (endRef.current) {
       endRef.current.scrollIntoView({ behavior: "smooth", block: "end" });
     }
-  }, [logs.length]);
+  }, [safeLogs.length]);
+
   // Count errors/warnings for the title bar summary
-  const errorCount = logs.filter((l) => l.level === "ERROR").length;
-  const warnCount = logs.filter((l) => l.level === "WARN").length;
+  const errorCount = safeLogs.filter((l) => l.level === "ERROR").length;
+  const warnCount = safeLogs.filter((l) => l.level === "WARN").length;
+
   return (
     <div className="overflow-hidden rounded-lg border border-slate-700/80 bg-slate-950 shadow-lg shadow-slate-950/20">
       {/* Title bar — subtle gradient + traffic lights + live indicator */}
@@ -74,7 +112,7 @@ export function TerminalConsole({ logs, onClear, active }: TerminalConsoleProps)
             </span>
           )}
           <span className="text-[10px] text-slate-500 tabular-nums">
-            {logs.length} lines
+            {safeLogs.length} lines
           </span>
           {onClear && (
             <Button
@@ -92,7 +130,7 @@ export function TerminalConsole({ logs, onClear, active }: TerminalConsoleProps)
       {/* Console body */}
       <div
         ref={scrollRef}
-        className="max-h-56 min-h-[120px] overflow-y-auto p-3 font-mono text-xs leading-relaxed"
+        className="max-h-72 min-h-[140px] overflow-y-auto p-3 font-mono text-xs leading-relaxed"
         style={{
           scrollbarWidth: "thin",
           scrollbarColor: "#475569 #020617",
@@ -111,7 +149,7 @@ export function TerminalConsole({ logs, onClear, active }: TerminalConsoleProps)
               return (
                 <div
                   key={i}
-                  className={`flex gap-2 whitespace-pre-wrap break-all rounded px-1 py-0.5 transition-colors hover:bg-slate-800/40 ${style.bg}`}
+                  className={`flex gap-2 whitespace-pre-wrap break-all rounded px-1.5 py-1 transition-colors hover:bg-slate-800/40 ${style.bg}`}
                 >
                   <span className="shrink-0 text-slate-600 tabular-nums">
                     {formatTime(log.ts)}
@@ -119,7 +157,7 @@ export function TerminalConsole({ logs, onClear, active }: TerminalConsoleProps)
                   <span className={`shrink-0 font-bold ${style.color}`}>
                     [{style.prefix}]
                   </span>
-                  <span className="text-slate-200">{log.msg}</span>
+                  <div className="flex-1">{renderLogContent(log.msg)}</div>
                 </div>
               );
             })}

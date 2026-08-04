@@ -42,6 +42,7 @@ import {
   cny,
 } from "./types";
 import { displayTitle as cleanDisplayTitle, translateConditionRaw } from "@/lib/engine/normalizer";
+import { getConditionFlagClasses } from "@/lib/engine/condition-flags";
 import { ensureArray } from "@/lib/utils";
 
 // Normalize image URLs — ensures protocol-relative URLs (//img.alicdn.com/...)
@@ -562,27 +563,15 @@ export function ListingDetailDialog({
                 </h4>
                 <div className="flex flex-wrap gap-1.5">
                   {/* Enriched condition flags from the listing detail page */}
-                  {safeConditionFlags.map((flag) => {
-                    const isPositive = flag === "All Original" || flag === "Original" || flag === "Never Opened" || flag === "No Water Damage";
-                    const isNegative = flag === "Battery Replaced" || flag === "Screen Replaced" ||
-                      flag === "No Box" || flag === "Water Damage" || flag === "Screen Leak" ||
-                      flag === "Cracked Screen" || flag === "Locked" || flag === "Repaired" || flag === "Opened/Repaired";
-                    return (
-                      <Badge
-                        key={flag}
-                        variant="outline"
-                        className={`text-xs ${
-                          isPositive
-                            ? "border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300"
-                            : isNegative
-                              ? "border-rose-300 bg-rose-50 text-rose-700 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-300"
-                              : "border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300"
-                        }`}
-                      >
-                        {flag}
-                      </Badge>
-                    );
-                  })}
+                  {safeConditionFlags.map((flag) => (
+                    <Badge
+                      key={flag}
+                      variant="outline"
+                      className={`text-xs ${getConditionFlagClasses(flag)}`}
+                    >
+                      {flag}
+                    </Badge>
+                  ))}
                   {/* Yellow modifier tokens from the scam detector (from text) */}
                   {safeYellowTokens
                     .filter((t) => !safeConditionFlags.some((f) => t.includes(f)))

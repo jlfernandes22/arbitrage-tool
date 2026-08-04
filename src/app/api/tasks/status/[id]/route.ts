@@ -69,5 +69,6 @@ export async function GET(
       ? new Date(task.finishedAt).toISOString()
       : null,
     logs: task.logs ?? [],
+    estimated_sec: task.estimatedSec,
   });
 }

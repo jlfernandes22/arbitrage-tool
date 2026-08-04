@@ -177,6 +177,7 @@ export interface TaskState {
   configOverrides?: Partial<AppConfig>;
   logs: LogEntry[]; // recent execution logs for the terminal console
   cancelRequested?: boolean; // set by POST /api/tasks/[id]/cancel — orchestrator polls this
+  estimatedSec?: number; // factual estimated duration in seconds
 }
 // Re-export config type for convenience
 export type { AppConfig } from "@/lib/config";
