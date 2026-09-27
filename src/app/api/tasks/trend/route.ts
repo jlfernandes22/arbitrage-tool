@@ -58,20 +58,39 @@ export async function GET(request: Request) {
           const listings = ensureArray<EvaluatedListing>(result.listings);
           if (listings.length === 0) return null;
 
-          // Extract prices from viable (non-hidden) listings
-          const viable = listings.filter((l: { hidden: boolean }) => !l.hidden);
-          if (viable.length === 0) return null;
+          // Include every listing with REAL market data: a positive Goofish
+          // price and a computed profit. Profit-filtered listings (margin or
+          // net profit below the gate) are genuine market observations —
+          // excluding them made the trend empty exactly when the market is
+          // tight (all margins negative), which is when you need it most.
+          // Only scam-hidden listings (fake/placeholder data) are excluded.
+          const usable = listings.filter(
+            (l: {
+              hidden: boolean;
+              hiddenReason?: string;
+              listing?: { priceCny?: number };
+              profit?: { netProfitEur?: number };
+            }) => {
+              if (!l.listing || typeof l.listing.priceCny !== "number" || l.listing.priceCny <= 0)
+                return false; // synthetic ¥0 placeholder (Goofish blocked)
+              if (typeof l.profit?.netProfitEur !== "number") return false;
+              if (l.hidden && /risk score|critical blacklist/i.test(l.hiddenReason ?? ""))
+                return false; // scam-hidden — garbage data
+              return true;
+            },
+          );
+          if (usable.length === 0) return null;
 
-          const goofishPricesCny = viable
+          const goofishPricesCny = usable
             .map((l: { listing: { priceCny: number } }) => l.listing?.priceCny)
             .filter((p: number | undefined): p is number => typeof p === "number" && p > 0);
-          const profitEurs = viable
+          const profitEurs = usable
             .map((l: { profit: { netProfitEur: number } }) => l.profit?.netProfitEur)
             .filter((p: number | undefined): p is number => typeof p === "number");
-          const resaleEurs = viable
+          const resaleEurs = usable
             .map((l: { profit: { expectedResaleEur: number } }) => l.profit?.expectedResaleEur)
             .filter((p: number | undefined): p is number => typeof p === "number" && p > 0);
-          const margins = viable
+          const margins = usable
             .map((l: { profit: { marginPct: number } }) => l.profit?.marginPct)
             .filter((p: number | undefined): p is number => typeof p === "number");
 
@@ -89,7 +108,8 @@ export async function GET(request: Request) {
             taskId: task.id,
             query: task.query,
             date: task.createdAt.toISOString(),
-            listingCount: viable.length,
+            listingCount: usable.length,
+            filteredCount: listings.length - usable.length,
             medianGoofishCny: median(goofishPricesCny),
             medianProfitEur: median(profitEurs),
             medianResaleEur: median(resaleEurs),
@@ -106,6 +126,10 @@ export async function GET(request: Request) {
     return NextResponse.json({
       query,
       baseQuery,
+      // Number of completed scans whose query matched — lets the UI
+      // distinguish "no scans matched" from "scans matched but none had
+      // usable price data".
+      tasksMatched: tasks.length,
       dataPoints: trendData.length,
       trend: trendData,
     });

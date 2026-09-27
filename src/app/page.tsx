@@ -32,6 +32,8 @@ import {
   RotateCcw,
   Bell,
   BellOff,
+  Volume2,
+  VolumeX,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -64,6 +66,13 @@ import {
   notifyScanFinished,
   notifyScanFailed,
 } from "@/lib/notify";
+import {
+  getSoundPreference,
+  setSoundPreference,
+  playScanCompleteSound,
+  playScanFailedSound,
+  playTestBlip,
+} from "@/lib/sound";
 import {
   Collapsible,
   CollapsibleContent,
@@ -143,6 +152,7 @@ export default function Home() {
   // Desktop-notification toggle ("notify me when a scan finishes while I'm on
   // another tab"). Persisted in localStorage; permission requested on enable.
   const [notifyPref, setNotifyPref] = useState<"on" | "off">("off");
+  const [soundPref, setSoundPref] = useState<"on" | "off">("off");
   const [scanElapsed, setScanElapsed] = useState<number>(0);
   const estimateRemaining = useCallback((progress: number, targetSec?: number): number | null => {
     if (progress >= 100) return 0;
@@ -238,6 +248,9 @@ export default function Home() {
                   total: rdata.summary.total,
                   bestProfit: rdata.summary.bestProfitEur,
                 });
+                // Sound helper reads the preference from localStorage at play
+                // time — immune to stale closure state in this poll loop.
+                playScanCompleteSound();
               } else {
                 // Result reload failed (e.g. task evicted after a restart) —
                 // surface it instead of silently leaving a blank screen.
@@ -256,6 +269,7 @@ export default function Home() {
             setError(data.error ?? "Pipeline error");
             toast.error("Scan failed");
             notifyScanFailed(pollQueryRef.current, data.error);
+            playScanFailedSound();
             return;
           } else if (data.status === "paused") {
             stopPolling();
@@ -306,6 +320,9 @@ export default function Home() {
         setNotifyPreference("off");
       }
     }
+    // Restore sound preference — no permission gate needed; synthesized via
+    // Web Audio after the first user interaction (the toggle click).
+    setSoundPref(getSoundPreference());
     return () => {
       mountedRef.current = false;
       stopPolling();
@@ -329,6 +346,20 @@ export default function Home() {
       toast.error("Desktop notifications are not supported in this browser.");
     }
   }, [notifyPref]);
+  const handleToggleSound = useCallback(() => {
+    if (soundPref === "on") {
+      setSoundPref("off");
+      setSoundPreference("off");
+      toast.info("Completion sound off");
+      return;
+    }
+    setSoundPref("on");
+    setSoundPreference("on");
+    // Audible confirmation also warms up the AudioContext inside the user
+    // gesture (browsers block audio until first interaction).
+    playTestBlip();
+    toast.success("Completion sound on — you'll hear a chime when a scan finishes");
+  }, [soundPref]);
   const handleScan = useCallback(
     async (q: string, c: Category, overrides: AppConfigOverrides) => {
       // Double-submit guard: two clicks in the same tick would otherwise
@@ -833,6 +864,23 @@ export default function Home() {
                 <Bell className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
               ) : (
                 <BellOff className="h-3.5 w-3.5" />
+              )}
+            </Button>
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-8 w-8"
+              onClick={handleToggleSound}
+              title={
+                soundPref === "on"
+                  ? "Completion sound ON — click to mute"
+                  : "Play a sound when a scan finishes"
+              }
+            >
+              {soundPref === "on" ? (
+                <Volume2 className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+              ) : (
+                <VolumeX className="h-3.5 w-3.5" />
               )}
             </Button>
             <ThemeToggle />
@@ -1347,7 +1395,13 @@ export default function Home() {
                   : "—";
               const newMedian = median(newComps);
               const usedMedian = median(usedComps);
-              const newVsUsedDelta = newMedian > 0 && usedMedian > 0 ? newMedian - usedMedian : 0;
+              // Round to 2dp: odd-length medians keep their raw cents value
+              // (e.g. 284.21) and the float subtraction 284.21 - 210 produced
+              // garbage like "−€74.20999999999998" in the savings badge.
+              const newVsUsedDelta =
+                newMedian > 0 && usedMedian > 0
+                  ? Math.round((newMedian - usedMedian) * 100) / 100
+                  : 0;
               const usedDiscountPct = newMedian > 0 && usedMedian > 0
                 ? Math.round(((newMedian - usedMedian) / newMedian) * 100)
                 : 0;
@@ -1497,6 +1551,19 @@ export default function Home() {
                           −€{newVsUsedDelta}
                         </span>
                       </div>
+                      {/* Price-ratio bar: teal fill = used price as a share of
+                          the new median — makes the discount visible at a glance */}
+                      <div className="flex min-w-32 flex-1 items-center gap-2 sm:min-w-48">
+                        <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-emerald-200/70 dark:bg-emerald-900/60">
+                          <div
+                            className="h-full rounded-full bg-teal-500/80 transition-[width] duration-500 dark:bg-teal-400/80"
+                            style={{ width: `${Math.min(100, Math.max(2, (usedMedian / newMedian) * 100))}%` }}
+                          />
+                        </div>
+                        <span className="text-[9px] font-semibold tabular-nums text-teal-700 dark:text-teal-300">
+                          {Math.round((usedMedian / newMedian) * 100)}% of new
+                        </span>
+                      </div>
                       <span className="ml-auto text-[10px] text-muted-foreground">
                         Buying second-hand saves ~€{newVsUsedDelta} vs retail on this product
                       </span>
@@ -1606,7 +1673,9 @@ export default function Home() {
             )}
             {/* Results table */}
             <section className="space-y-2">
-              <div className="flex items-center justify-between">
+              {/* flex-wrap: on phones the heading + 5 toolbar buttons overflow
+                  the viewport (576px row on a 390px screen) without it */}
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
                   <h2 className="text-sm font-semibold">
                     Evaluated Listings
@@ -1630,7 +1699,7 @@ export default function Home() {
                     </Button>
                   )}
                 </div>
-                <div className="flex items-center gap-1.5">
+                <div className="flex flex-wrap items-center gap-1.5">
                   <Button
                     variant="outline"
                     size="sm"

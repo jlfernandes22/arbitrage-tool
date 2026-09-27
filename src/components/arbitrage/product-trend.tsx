@@ -9,6 +9,7 @@ interface TrendPoint {
   query: string;
   date: string;
   listingCount: number;
+  filteredCount?: number; // listings excluded (scam / ¥0 placeholders)
   medianGoofishCny: number;
   medianProfitEur: number;
   medianResaleEur: number;
@@ -20,6 +21,7 @@ interface TrendPoint {
 interface TrendResponse {
   query: string;
   baseQuery?: string;
+  tasksMatched?: number; // scans whose query matched (may have no usable data)
   dataPoints: number;
   trend: TrendPoint[];
 }
@@ -235,9 +237,19 @@ export function ProductTrend({ defaultQuery, refreshKey }: { defaultQuery?: stri
       )}
 
       {data && data.dataPoints === 0 && !loading && (
-        <p className="py-6 text-center text-xs text-muted-foreground">
-          No past scans found for &quot;{activeQuery}&quot;. Run a scan with this product first.
-        </p>
+        <div className="py-6 text-center">
+          {data.tasksMatched !== undefined && data.tasksMatched > 0 ? (
+            <p className="text-xs text-muted-foreground">
+              {data.tasksMatched} past scan{data.tasksMatched === 1 ? "" : "s"} matched
+              &quot;{activeQuery}&quot;, but none contained usable price data (no listings with a
+              real Goofish price + profit estimate).
+            </p>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              No past scans found for &quot;{activeQuery}&quot;. Run a scan with this product first.
+            </p>
+          )}
+        </div>
       )}
 
       {data && data.dataPoints > 0 && !loading && (
@@ -264,13 +276,22 @@ export function ProductTrend({ defaultQuery, refreshKey }: { defaultQuery?: stri
           {/* Trend chart */}
           {points.length >= 2 && (
             <div className="rounded-lg border bg-muted/20 p-3">
-              <div className="mb-2 flex items-center justify-between">
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-1.5">
                 <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
                   Median net profit (€) over time
                 </span>
-                <span className="text-[9px] text-muted-foreground">
-                  {points.length} data points
-                </span>
+                <div className="flex items-center gap-2">
+                  {/* Delta vs the previous scan — instant direction signal */}
+                  <DeltaChip
+                    delta={
+                      r(points[points.length - 1]?.medianProfitEur) -
+                      r(points[points.length - 2]?.medianProfitEur)
+                    }
+                  />
+                  <span className="text-[9px] text-muted-foreground">
+                    {points.length} data points
+                  </span>
+                </div>
               </div>
               <div className="relative h-40 w-full">
                 <svg
@@ -308,6 +329,9 @@ export function ProductTrend({ defaultQuery, refreshKey }: { defaultQuery?: stri
                     const x = i * 60 + 30;
                     const profit = r(p.medianProfitEur);
                     const y = ((maxProfit - profit) / range) * 140 + 10;
+                    // Labels above a point clip at the chart's top edge when
+                    // the point sits near the top (y < 20) — flip below it.
+                    const labelY = y < 20 ? y + 16 : y - 8;
                     return (
                       <g key={p.taskId}>
                         <circle
@@ -319,7 +343,7 @@ export function ProductTrend({ defaultQuery, refreshKey }: { defaultQuery?: stri
                         />
                         <text
                           x={x}
-                          y={y - 8}
+                          y={labelY}
                           textAnchor="middle"
                           className="fill-foreground text-[8px]"
                         >
@@ -353,11 +377,16 @@ export function ProductTrend({ defaultQuery, refreshKey }: { defaultQuery?: stri
               </thead>
               <tbody>
                 {points.slice().reverse().map((p) => (
-                  <tr key={p.taskId} className="border-t">
+                  <tr key={p.taskId} className="border-t transition-colors hover:bg-muted/40">
                     <td className="px-2 py-1.5 text-muted-foreground">
                       {new Date(p.date).toLocaleDateString("pt-PT", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
                     </td>
-                    <td className="px-2 py-1.5 text-right tabular-nums">{p.listingCount}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">
+                      {p.listingCount}
+                      {typeof p.filteredCount === "number" && p.filteredCount > 0 && (
+                        <span className="ml-1 text-[9px] text-muted-foreground">(+{p.filteredCount} filtered)</span>
+                      )}
+                    </td>
                     <td className="px-2 py-1.5 text-right tabular-nums text-rose-600 dark:text-rose-400">¥{r(p.medianGoofishCny)}</td>
                     <td className="px-2 py-1.5 text-right tabular-nums text-teal-600 dark:text-teal-400">€{r(p.medianResaleEur)}</td>
                     <td className={`px-2 py-1.5 text-right font-semibold tabular-nums ${r(p.medianProfitEur) >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
@@ -389,5 +418,29 @@ function StatCard({ label, value, tone }: { label: string; value: string; tone?:
         {value}
       </div>
     </div>
+  );
+}
+
+/** ▲/▼ chip showing how the latest scan moved vs the previous one. */
+function DeltaChip({ delta }: { delta: number }) {
+  if (delta === 0) {
+    return (
+      <span className="rounded-full bg-muted px-1.5 py-0.5 text-[9px] font-semibold tabular-nums text-muted-foreground">
+        = unchanged
+      </span>
+    );
+  }
+  const up = delta > 0;
+  return (
+    <span
+      className={`rounded-full px-1.5 py-0.5 text-[9px] font-bold tabular-nums ${
+        up
+          ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
+          : "bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300"
+      }`}
+      title="Latest scan median profit vs the previous scan"
+    >
+      {up ? "▲" : "▼"} €{Math.abs(delta)} vs prev
+    </span>
   );
 }
