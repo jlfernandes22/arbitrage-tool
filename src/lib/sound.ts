@@ -108,3 +108,25 @@ export function playTestBlip(): void {
     // ignore
   }
 }
+
+/**
+ * Bright ascending three-note fanfare — "a scan found a deal that beats your
+ * target margin". Deliberately more celebratory (3 notes, higher, triangle
+ * shimmer) than the 2-note completion chime so the two are distinguishable
+ * by ear alone.
+ */
+export function playDealAlertSound(): void {
+  if (getSoundPreference() !== "on") return;
+  try {
+    const ctx = getCtx();
+    if (!ctx) return;
+    const t0 = ctx.currentTime + 0.01;
+    tone(ctx, 523.25, t0, 0.16, "triangle", 0.08); // C5
+    tone(ctx, 659.25, t0 + 0.14, 0.16, "triangle", 0.08); // E5
+    tone(ctx, 783.99, t0 + 0.28, 0.34, "triangle", 0.09); // G5
+    // Subtle octave shimmer on top for the "payday" feel.
+    tone(ctx, 1567.98, t0 + 0.3, 0.3, "sine", 0.035); // G6
+  } catch {
+    // audio unavailable — alerts are best-effort
+  }
+}

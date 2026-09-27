@@ -44,6 +44,7 @@ import {
 import { displayTitle as cleanDisplayTitle, translateConditionRaw } from "@/lib/engine/normalizer";
 import { getConditionFlagClasses } from "@/lib/engine/condition-flags";
 import { ensureArray } from "@/lib/utils";
+import { WhatIfSimulator } from "./what-if-simulator";
 
 // Normalize image URLs — ensures protocol-relative URLs (//img.alicdn.com/...)
 // get the https: prefix so they load correctly in all browsers.
@@ -624,7 +625,14 @@ export function ListingDetailDialog({
               <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                 Landed Cost Breakdown (CNY → Portugal)
               </h4>
-              <Table>
+              {/* table-fixed + colgroup: keeps the label/value ratio AND caps the
+                  table's min-content so narrow screens (390px) don't get pushed
+                  into horizontal overflow by long row labels. */}
+              <Table className="w-full table-fixed">
+                <colgroup>
+                  <col className="w-[58%]" />
+                  <col className="w-[42%]" />
+                </colgroup>
                 <TableBody>
                   <Row k="Acquisition price (CNY)" v={cny(landed.priceCny)} />
                   <Row
@@ -654,7 +662,11 @@ export function ListingDetailDialog({
               <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                 Profit Analysis
               </h4>
-              <Table>
+              <Table className="w-full table-fixed">
+                <colgroup>
+                  <col className="w-[58%]" />
+                  <col className="w-[42%]" />
+                </colgroup>
                 <TableBody>
                   <Row
                     k={`Expected resale (${profit.resaleSource ?? "median EU comps"})`}
@@ -692,6 +704,12 @@ export function ListingDetailDialog({
                 </TableBody>
               </Table>
             </section>
+            {/* What-if simulator — negotiate purchase / set your own resale and
+                watch the full landed-cost + profit chain recompute live.
+                key={l.id} resets sliders when a different listing opens. */}
+            {l && profit && (
+              <WhatIfSimulator key={l.id} profit={profit} listing={l} />
+            )}
             {/* Scam report */}
             <section className="min-w-0 rounded-lg border bg-muted/30 p-3">
               <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -740,7 +758,12 @@ export function ListingDetailDialog({
                 </p>
               ) : (
                 <div className="max-h-64 w-full overflow-auto rounded-md border">
-                  <Table className="w-full">
+                  {/* table-fixed: the auto-layout table's min-content width (~900px
+                      for long OLX titles) used to force the whole dialog content
+                      60px wider than the viewport, clipping the right edge of the
+                      What-if Simulator with overflow-x hidden. Fixed layout makes
+                      the table strictly honor its container width instead. */}
+                  <Table className="w-full table-fixed">
                     <TableHeader className="sticky top-0 bg-background">
                       <TableRow>
                         <TableHead className="h-8 w-16 text-xs">Platform</TableHead>
@@ -771,7 +794,9 @@ export function ListingDetailDialog({
                           <TableCell className="py-1.5 text-xs">
                             {CONDITION_LABELS[c.condition]}
                           </TableCell>
-                          <TableCell className="py-1.5 text-xs">{c.location ?? "—"}</TableCell>
+                          <TableCell className="max-w-[60px] truncate py-1.5 text-xs" title={c.location ?? undefined}>
+                            {c.location ?? "—"}
+                          </TableCell>
                           <TableCell className="py-1.5 text-right text-xs font-medium tabular-nums">
                             {eur(c.priceEur)}
                           </TableCell>

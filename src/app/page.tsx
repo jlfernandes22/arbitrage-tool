@@ -65,6 +65,7 @@ import {
   notificationsSupported,
   notifyScanFinished,
   notifyScanFailed,
+  notifyDealFound,
 } from "@/lib/notify";
 import {
   getSoundPreference,
@@ -72,7 +73,14 @@ import {
   playScanCompleteSound,
   playScanFailedSound,
   playTestBlip,
+  playDealAlertSound,
 } from "@/lib/sound";
+import {
+  evaluateDealAlert,
+  getDealAlertEnabled,
+  getDealAlertThreshold,
+} from "@/lib/deal-alert";
+import { DealAlertControl } from "@/components/arbitrage/deal-alert-control";
 import {
   Collapsible,
   CollapsibleContent,
@@ -242,15 +250,46 @@ export default function Home() {
                 toast.success(
                   `Scan complete — ${rdata.summary.shown} viable leads of ${rdata.summary.total} listings`,
                 );
-                notifyScanFinished({
-                  query: pollQueryRef.current,
-                  viable: rdata.summary.shown,
-                  total: rdata.summary.total,
-                  bestProfit: rdata.summary.bestProfitEur,
+                // Deal alert: did the best VIABLE lead beat the user's target
+                // margin? Preferences are read from localStorage at completion
+                // time (same pattern as the sound helpers) so poll-loop
+                // closures can never go stale. When a deal fires it SUPERSEDES
+                // the routine completion ping — fanfare + dedicated OS
+                // notification + a long-lived rich toast instead.
+                const deal = evaluateDealAlert({
+                  shown: rdata.summary.shown,
+                  bestMarginPct: rdata.summary.bestMarginPct,
+                  bestProfitEur: rdata.summary.bestProfitEur,
+                  threshold: getDealAlertThreshold(),
+                  enabled: getDealAlertEnabled(),
                 });
-                // Sound helper reads the preference from localStorage at play
-                // time — immune to stale closure state in this poll loop.
-                playScanCompleteSound();
+                if (deal) {
+                  playDealAlertSound();
+                  notifyDealFound({
+                    query: pollQueryRef.current,
+                    marginPct: deal.marginPct,
+                    profitEur: deal.profitEur,
+                    viable: rdata.summary.shown,
+                  });
+                  toast.success(
+                    `🎯 Deal alert — ${deal.marginPct.toFixed(1)}% margin · €${Math.round(deal.profitEur)} net on "${pollQueryRef.current}"`,
+                    {
+                      description:
+                        "A viable lead beat your target margin. Check the results table — sorted by margin — and open the listing for the landed-cost breakdown.",
+                      duration: 12000,
+                    },
+                  );
+                } else {
+                  notifyScanFinished({
+                    query: pollQueryRef.current,
+                    viable: rdata.summary.shown,
+                    total: rdata.summary.total,
+                    bestProfit: rdata.summary.bestProfitEur,
+                  });
+                  // Sound helper reads the preference from localStorage at play
+                  // time — immune to stale closure state in this poll loop.
+                  playScanCompleteSound();
+                }
               } else {
                 // Result reload failed (e.g. task evicted after a restart) —
                 // surface it instead of silently leaving a blank screen.
@@ -757,7 +796,7 @@ export default function Home() {
     <div className="flex min-h-screen flex-col bg-background">
       {/* Header */}
       <header className="sticky top-0 z-30 shrink-0 border-b bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-4">
+        <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-3 sm:px-4">
           <div className="flex items-center gap-2.5">
             {/* Mobile sidebar trigger (Sheet drawer) — hidden on lg+ where the
                 persistent sidebar is always visible. */}
@@ -817,12 +856,14 @@ export default function Home() {
               <span className="text-sm font-bold tracking-tight">
                 Arbitrage Intelligence
               </span>
-              <span className="text-[10px] text-muted-foreground">
+              {/* hidden on mobile: the 4-marketplace subtitle is ~160px and was a
+                  major contributor to the 390px header overflow. */}
+              <span className="hidden text-[10px] text-muted-foreground sm:block">
                 Goofish → OLX + Vinted + KuantoKusta + Amazon
               </span>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 sm:gap-2">
             <Badge variant="outline" className="hidden gap-1 sm:flex">
               <Globe className="h-3 w-3" />
               CNY → EUR
@@ -834,7 +875,7 @@ export default function Home() {
             <Button
               variant="outline"
               size="icon"
-              className="h-8 w-8"
+              className="hidden h-8 w-8 sm:inline-flex"
               onClick={() => setShortcutsOpen(true)}
               title="Keyboard shortcuts (?)"
             >
@@ -866,6 +907,7 @@ export default function Home() {
                 <BellOff className="h-3.5 w-3.5" />
               )}
             </Button>
+            <DealAlertControl />
             <Button
               variant="outline"
               size="icon"

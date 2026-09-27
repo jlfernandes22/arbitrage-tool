@@ -104,3 +104,38 @@ export function notifyScanFailed(query: string, error?: string | null): void {
     // ignore
   }
 }
+
+/**
+ * Deal alert — a scan found a viable lead above the user's target margin.
+ * Unlike the routine scan-complete ping, a deal is worth interrupting for:
+ * this notification fires EVEN when the tab is visible (the accompanying
+ * rich toast still shows details, but the OS-level ping guarantees the user
+ * doesn't miss a real lead while browsing elsewhere on the page).
+ * Uses its own notification tag so it never replaces/gets replaced by the
+ * routine "scan complete" ping.
+ */
+export function notifyDealFound(opts: {
+  query: string;
+  marginPct: number;
+  profitEur: number;
+  viable: number;
+}): void {
+  if (!notificationsSupported()) return;
+  if (Notification.permission !== "granted") return;
+  const profit =
+    opts.profitEur > 0 ? ` · €${Math.round(opts.profitEur)} net` : "";
+  const others =
+    opts.viable > 1 ? ` (+${opts.viable - 1} more viable)` : "";
+  try {
+    const n = new Notification(`🎯 Deal: ${opts.query}`, {
+      body: `${opts.marginPct.toFixed(1)}% margin${profit}${others}`,
+      tag: "arbitrage-deal-alert",
+    });
+    n.onclick = () => {
+      window.focus();
+      n.close();
+    };
+  } catch {
+    // ignore — best-effort
+  }
+}
