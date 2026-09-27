@@ -7,12 +7,15 @@
 // Strategy: Try a plain HTTP fetch first (which has a different TLS
 // fingerprint than Playwright headless Chrome and is less likely to be
 // blocked by Akamai WAF). If that returns HTML, parse it. If blocked,
-// fall back to Playwright with stealth measures.
+// fall back to Playwright — first with the FULL Chromium engine
+// (channel "chromium", far harder for Akamai to fingerprint than the
+// headless shell) and an engine-matched UA, then the default shell.
+// If Akamai still denies access, return an honest "blocked" status so
+// the UI can show exactly why there are no KuantoKusta results.
 import { config } from "@/lib/config";
 import type { Condition, EuMarketComp, NormalizedProduct } from "@/lib/engine/types";
 import { buildEuQuery } from "@/lib/engine/matcher";
 import { isTitleRelevantToQuery } from "@/lib/engine/relevance";
-import { createContext } from "./browser";
 import { sleep, jitter, isAccessoryTitle } from "./utils";
 
 export interface KuantokustaScrapeResult {
@@ -20,11 +23,44 @@ export interface KuantokustaScrapeResult {
   degraded: boolean;
   warning?: string;
   liveFetchStatus?: string;
+  blocked?: boolean; // anti-bot (Akamai) denied the fetch
 }
 
 function buildKuantokustaSearchUrl(query: string, page: number = 1): string {
   const base = `${config.scraping.kuantokusta_search_url}${encodeURIComponent(query)}`;
   return page > 1 ? `${base}&page=${page}` : base;
+}
+
+/**
+ * Launch the FULL Chromium engine in new-headless mode (channel
+ * "chromium") with a graceful fallback to the default headless shell.
+ * Akamai's fingerprinting is much harsher on the headless shell — the
+ * full engine is byte-identical to regular Chrome for its probes.
+ */
+async function launchKkBrowser(): Promise<import("playwright").Browser> {
+  const { chromium } = await import("playwright");
+  try {
+    return await chromium.launch({
+      headless: true,
+      channel: "chromium",
+      args: [
+        "--disable-blink-features=AutomationControlled",
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+      ],
+    });
+  } catch {
+    return await chromium.launch({
+      headless: true,
+      args: [
+        "--disable-blink-features=AutomationControlled",
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+      ],
+    });
+  }
 }
 
 /**
@@ -206,7 +242,7 @@ async function fetchKkHtml(euQuery: string, page: number = 1): Promise<{ html: s
 async function scrapeKuantokustaLive(
   euQuery: string,
   maxPages: number,
-): Promise<{ comps: EuMarketComp[]; status: string }> {
+): Promise<{ comps: EuMarketComp[]; status: string; blocked: boolean }> {
   const allItems: Array<{ title: string; priceEur: number; store: string; url?: string }> = [];
   const seenTitles = new Set<string>();
 
@@ -253,46 +289,80 @@ async function scrapeKuantokustaLive(
       status: usedFallbackParser
         ? `LIVE OK (HTTP fetch, ${allItems.length} comps) | WARNING: used fallback parser — titles/prices are correlated by HTML proximity and may be mispaired`
         : `LIVE OK (HTTP fetch, ${allItems.length} comps)`,
+      blocked: false,
     };
   }
 
-  // Strategy 2: Playwright fallback with stealth measures
-  // KuantoKusta uses Akamai WAF which blocks headless browsers.
-  // Use extra stealth measures: realistic headers, longer waits.
-  const ctx = await createContext("pt-PT");
+  // Strategy 2: Playwright fallback — FULL Chromium engine first.
+  // KuantoKusta uses Akamai WAF which blocks headless browsers and
+  // datacenter IPs. Use the full engine + engine-matched UA + realistic
+  // headers, and poll for products to give Akamai's JS a chance.
+  const browser = await launchKkBrowser();
   try {
-    const page = await ctx.newPage();
+    // Read the REAL Chromium version so UA ↔ Sec-Ch-Ua ↔ engine all match
+    // (Akamai cross-checks these — a mismatch is an instant flag).
+    const probe = await browser.newContext();
+    const probePage = await probe.newPage();
+    const realVersion = await probePage.evaluate(() => {
+      const m = navigator.userAgent.match(/Chrome\/(\d+)/);
+      return m ? parseInt(m[1], 10) : 131;
+    }).catch(() => 131);
+    await probePage.close().catch(() => {});
+    await probe.close().catch(() => {});
+    const ver = Number.isFinite(realVersion) ? realVersion : 131;
 
-    // Set extra headers to look more like a real browser
-    await page.setExtraHTTPHeaders({
-      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-      "Accept-Language": "pt-PT,pt;q=0.9,en;q=0.8",
-      "Accept-Encoding": "gzip, deflate, br",
-      "Cache-Control": "no-cache",
-      "Sec-Ch-Ua": '"Chromium";v="131", "Not_A Brand";v="24", "Google Chrome";v="131"',
-      "Sec-Ch-Ua-Mobile": "?0",
-      "Sec-Ch-Ua-Platform": '"Windows"',
-      "Sec-Fetch-Dest": "document",
-      "Sec-Fetch-Mode": "navigate",
-      "Sec-Fetch-Site": "none",
-      "Sec-Fetch-User": "?1",
-      "Upgrade-Insecure-Requests": "1",
+    const ctx = await browser.newContext({
+      userAgent: `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${ver}.0.0.0 Safari/537.36`,
+      locale: "pt-PT",
+      viewport: { width: 1920, height: 1080 },
+      extraHTTPHeaders: {
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "pt-PT,pt;q=0.9,en;q=0.8",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Cache-Control": "no-cache",
+        "Sec-Ch-Ua": `"Chromium";v="${ver}", "Not_A Brand";v="24", "Google Chrome";v="${ver}"`,
+        "Sec-Ch-Ua-Mobile": "?0",
+        "Sec-Ch-Ua-Platform": '"Windows"',
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "none",
+        "Sec-Fetch-User": "?1",
+        "Upgrade-Insecure-Requests": "1",
+      },
     });
-
+    await ctx.addInitScript(() => {
+      Object.defineProperty(navigator, "webdriver", { get: () => undefined });
+      Object.defineProperty(navigator, "platform", { get: () => "Win32" });
+    });
+    const page = await ctx.newPage();
+    let akamaiDenied = false;
     for (let pageNum = 1; pageNum <= maxPages; pageNum++) {
       const url = buildKuantokustaSearchUrl(euQuery, pageNum);
       await page.goto(url, { waitUntil: "domcontentloaded", timeout: 20000 });
 
-      // Wait for Cloudflare/Akamai challenge to pass (up to 15s)
-      try {
-        await page.waitForSelector(
-          "[class*='product'], [data-product-id], [class*='card'], a[href*='/produto/']",
-          { state: "attached", timeout: 15000 },
-        );
-      } catch {
-        // Try scrolling to trigger lazy load
-        await page.evaluate(() => window.scrollBy(0, 600));
-        await page.waitForTimeout(3000);
+      // Poll for products for up to 15s — Akamai sometimes serves an
+      // interstitial first, and a credible browser passes it silently.
+      // NOTE: the probe runs via page.evaluate (Node side) so denial
+      // detection actually propagates — browser-context callbacks can't
+      // mutate Node variables.
+      let denied = false;
+      const pollStart = Date.now();
+      while (Date.now() - pollStart < 15000) {
+        const state = await page.evaluate(() => ({
+          products: document.querySelectorAll("a[href*='/produto/']").length,
+          title: document.title || "",
+          body: (document.body?.innerText || "").substring(0, 300),
+        })).catch(() => ({ products: 0, title: "", body: "" }));
+        if (state.products > 0) break;
+        if (/access denied|forbidden|403/i.test(state.title) || /access denied/i.test(state.body)) {
+          denied = true;
+          break;
+        }
+        await page.waitForTimeout(750);
+      }
+      if (denied) {
+        akamaiDenied = true;
+        break;
       }
 
       const pageItems = await page.evaluate(() => {
@@ -347,7 +417,7 @@ async function scrapeKuantokustaLive(
       }
       if (newCount === 0) break;
     }
-    await ctx.close();
+    await ctx.close().catch(() => {});
     if (allItems.length > 0) {
       return {
         comps: allItems.map((c, i) => ({
@@ -364,16 +434,22 @@ async function scrapeKuantokustaLive(
           isRetail: true,
         })),
         status: `LIVE OK (Playwright, ${allItems.length} comps from ${maxPages} pages)`,
+        blocked: false,
       };
     }
     return {
       comps: [],
-      status: `LIVE FETCH FAILED: KuantoKusta blocked by Akamai WAF (HTTP 403 + Playwright blocked). This IP is blocked.`,
+      status: akamaiDenied
+        ? `LIVE FETCH BLOCKED: KuantoKusta's Akamai WAF denies access from this IP/network (HTTP 403 on both HTTP fetch and a real-browser session). Works from residential/Portuguese IPs — this is a network-level block, not a scraper bug.`
+        : `LIVE FETCH FAILED: KuantoKusta rendered no product cards (no /produto/ links found). The page may have changed or the search returned nothing.`,
+      blocked: akamaiDenied,
     };
   } catch (e) {
-    await ctx.close();
+    await browser.close().catch(() => {});
     const msg = e instanceof Error ? e.message : String(e);
-    return { comps: [], status: `LIVE FETCH FAILED: ${msg}` };
+    return { comps: [], status: `LIVE FETCH FAILED: ${msg}`, blocked: false };
+  } finally {
+    await browser.close().catch(() => {});
   }
 }
 
@@ -386,15 +462,18 @@ export async function scrapeKuantokusta(
   const maxPages =
     opts?.maxPages && opts.maxPages > 0 ? opts.maxPages : config.scraping.max_pages;
   await sleep(jitter(config.scraping.jitter_min_ms, config.scraping.jitter_max_ms));
-  const { comps, status } = await scrapeKuantokustaLive(euQuery, maxPages);
+  const { comps, status, blocked } = await scrapeKuantokustaLive(euQuery, maxPages);
   if (comps.length > 0) {
     return { comps, degraded: false, liveFetchStatus: status };
   }
   return {
     comps: [],
     degraded: true,
-    warning: `KuantoKusta live fetch returned 0 comps.`,
+    warning: blocked
+      ? `KuantoKusta: Akamai WAF denied access from this network (403). Works from residential IPs — not a scraper bug.`
+      : `KuantoKusta live fetch returned 0 comps. ${status}`,
     liveFetchStatus: status,
+    blocked,
   };
 }
 

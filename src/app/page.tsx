@@ -77,6 +77,7 @@ import {
 import { ControlPanel } from "@/components/arbitrage/control-panel";
 import { SummaryCards } from "@/components/arbitrage/summary-cards";
 import { ResultsTable } from "@/components/arbitrage/results-table";
+import { ScraperStatusPanel } from "@/components/arbitrage/scraper-status-panel";
 import { TaskHistory } from "@/components/arbitrage/task-history";
 import { TerminalConsole } from "@/components/arbitrage/terminal-console";
 import { ProfitChart } from "@/components/arbitrage/profit-chart";
@@ -1122,6 +1123,10 @@ export default function Home() {
         {/* Result */}
         {result && (
           <>
+            {/* Per-scraper outcome breakdown — shows exactly which sites
+                produced data and which failed (with the reason), so the
+                user immediately knows what to debug. */}
+            <ScraperStatusPanel statuses={result.scraperStatuses ?? []} />
             {/* Warnings */}
 {Array.isArray(result.warnings) && result.warnings.length > 0 && (
   <Alert className="border-amber-300 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/40">

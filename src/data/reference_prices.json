@@ -971,5 +971,390 @@
     "very_good": 40,
     "good": 33,
     "fair": 23
+  },
+  "iPhone 11 64GB": {
+    "new": 310,
+    "excellent": 260,
+    "very_good": 230,
+    "good": 195,
+    "fair": 145
+  },
+  "iPhone 11 128GB": {
+    "new": 350,
+    "excellent": 295,
+    "very_good": 260,
+    "good": 220,
+    "fair": 165
+  },
+  "iPhone 11 Pro 64GB": {
+    "new": 420,
+    "excellent": 355,
+    "very_good": 315,
+    "good": 265,
+    "fair": 200
+  },
+  "iPhone 11 Pro 256GB": {
+    "new": 480,
+    "excellent": 405,
+    "very_good": 360,
+    "good": 305,
+    "fair": 230
+  },
+  "iPhone 11 Pro Max 64GB": {
+    "new": 460,
+    "excellent": 390,
+    "very_good": 345,
+    "good": 290,
+    "fair": 220
+  },
+  "iPhone 11 Pro Max 256GB": {
+    "new": 520,
+    "excellent": 440,
+    "very_good": 390,
+    "good": 330,
+    "fair": 250
+  },
+  "iPhone XS 64GB": {
+    "new": 230,
+    "excellent": 195,
+    "very_good": 170,
+    "good": 140,
+    "fair": 105
+  },
+  "iPhone XS 256GB": {
+    "new": 265,
+    "excellent": 225,
+    "very_good": 195,
+    "good": 165,
+    "fair": 125
+  },
+  "iPhone XS Max 64GB": {
+    "new": 265,
+    "excellent": 225,
+    "very_good": 195,
+    "good": 165,
+    "fair": 125
+  },
+  "iPhone XS Max 256GB": {
+    "new": 300,
+    "excellent": 255,
+    "very_good": 225,
+    "good": 190,
+    "fair": 145
+  },
+  "iPhone XR 64GB": {
+    "new": 215,
+    "excellent": 180,
+    "very_good": 160,
+    "good": 135,
+    "fair": 100
+  },
+  "iPhone XR 128GB": {
+    "new": 245,
+    "excellent": 205,
+    "very_good": 180,
+    "good": 150,
+    "fair": 115
+  },
+  "iPhone X 64GB": {
+    "new": 195,
+    "excellent": 165,
+    "very_good": 145,
+    "good": 120,
+    "fair": 90
+  },
+  "iPhone X 256GB": {
+    "new": 230,
+    "excellent": 195,
+    "very_good": 170,
+    "good": 140,
+    "fair": 105
+  },
+  "iPhone SE 2020 64GB": {
+    "new": 165,
+    "excellent": 140,
+    "very_good": 120,
+    "good": 100,
+    "fair": 75
+  },
+  "iPhone SE 2020 128GB": {
+    "new": 195,
+    "excellent": 165,
+    "very_good": 145,
+    "good": 120,
+    "fair": 90
+  },
+  "iPhone SE 2022 64GB": {
+    "new": 235,
+    "excellent": 200,
+    "very_good": 175,
+    "good": 145,
+    "fair": 110
+  },
+  "iPhone SE 2022 128GB": {
+    "new": 265,
+    "excellent": 225,
+    "very_good": 195,
+    "good": 165,
+    "fair": 125
+  },
+  "iPhone SE 2022 256GB": {
+    "new": 295,
+    "excellent": 250,
+    "very_good": 220,
+    "good": 185,
+    "fair": 140
+  },
+  "iPhone 12 Mini 64GB": {
+    "new": 250,
+    "excellent": 210,
+    "very_good": 185,
+    "good": 155,
+    "fair": 115
+  },
+  "iPhone 12 Mini 128GB": {
+    "new": 280,
+    "excellent": 235,
+    "very_good": 205,
+    "good": 175,
+    "fair": 130
+  },
+  "iPhone 12 Pro Max 128GB": {
+    "new": 520,
+    "excellent": 440,
+    "very_good": 390,
+    "good": 330,
+    "fair": 250
+  },
+  "iPhone 12 Pro Max 256GB": {
+    "new": 570,
+    "excellent": 480,
+    "very_good": 425,
+    "good": 360,
+    "fair": 275
+  },
+  "iPhone 12 256GB": {
+    "new": 470,
+    "excellent": 395,
+    "very_good": 350,
+    "good": 295,
+    "fair": 225
+  },
+  "iPhone 13 Mini 128GB": {
+    "new": 380,
+    "excellent": 320,
+    "very_good": 285,
+    "good": 240,
+    "fair": 180
+  },
+  "iPhone 13 Pro 128GB": {
+    "new": 580,
+    "excellent": 490,
+    "very_good": 435,
+    "good": 370,
+    "fair": 280
+  },
+  "iPhone 13 Pro 256GB": {
+    "new": 640,
+    "excellent": 540,
+    "very_good": 480,
+    "good": 405,
+    "fair": 310
+  },
+  "iPhone 13 Pro Max 128GB": {
+    "new": 640,
+    "excellent": 540,
+    "very_good": 480,
+    "good": 405,
+    "fair": 310
+  },
+  "iPhone 13 Pro Max 256GB": {
+    "new": 700,
+    "excellent": 590,
+    "very_good": 525,
+    "good": 445,
+    "fair": 340
+  },
+  "iPhone 13 512GB": {
+    "new": 620,
+    "excellent": 525,
+    "very_good": 465,
+    "good": 395,
+    "fair": 300
+  },
+  "iPhone 14 Plus 128GB": {
+    "new": 560,
+    "excellent": 475,
+    "very_good": 420,
+    "good": 355,
+    "fair": 270
+  },
+  "iPhone 14 Plus 256GB": {
+    "new": 620,
+    "excellent": 525,
+    "very_good": 465,
+    "good": 395,
+    "fair": 300
+  },
+  "iPhone 14 Pro 512GB": {
+    "new": 820,
+    "excellent": 695,
+    "very_good": 615,
+    "good": 520,
+    "fair": 400
+  },
+  "iPhone 14 Pro Max 256GB": {
+    "new": 760,
+    "excellent": 645,
+    "very_good": 570,
+    "good": 485,
+    "fair": 370
+  },
+  "iPhone 14 Pro Max 512GB": {
+    "new": 880,
+    "excellent": 745,
+    "very_good": 660,
+    "good": 560,
+    "fair": 430
+  },
+  "iPhone 14 256GB": {
+    "new": 560,
+    "excellent": 475,
+    "very_good": 420,
+    "good": 355,
+    "fair": 270
+  },
+  "iPhone 14 512GB": {
+    "new": 660,
+    "excellent": 560,
+    "very_good": 495,
+    "good": 420,
+    "fair": 320
+  },
+  "iPhone 15 Plus 128GB": {
+    "new": 640,
+    "excellent": 540,
+    "very_good": 480,
+    "good": 405,
+    "fair": 310
+  },
+  "iPhone 15 Plus 256GB": {
+    "new": 700,
+    "excellent": 590,
+    "very_good": 525,
+    "good": 445,
+    "fair": 340
+  },
+  "iPhone 15 Pro 128GB": {
+    "new": 760,
+    "excellent": 645,
+    "very_good": 570,
+    "good": 485,
+    "fair": 370
+  },
+  "iPhone 15 Pro Max 256GB": {
+    "new": 900,
+    "excellent": 765,
+    "very_good": 680,
+    "good": 575,
+    "fair": 440
+  },
+  "iPhone 15 Pro Max 512GB": {
+    "new": 1040,
+    "excellent": 880,
+    "very_good": 780,
+    "good": 660,
+    "fair": 510
+  },
+  "iPhone 15 256GB": {
+    "new": 700,
+    "excellent": 590,
+    "very_good": 525,
+    "good": 445,
+    "fair": 340
+  },
+  "iPhone 15 512GB": {
+    "new": 820,
+    "excellent": 695,
+    "very_good": 615,
+    "good": 520,
+    "fair": 400
+  },
+  "iPhone 16 512GB": {
+    "new": 940,
+    "excellent": 800,
+    "very_good": 710,
+    "good": 600,
+    "fair": 460
+  },
+  "iPhone 16 Plus 512GB": {
+    "new": 1000,
+    "excellent": 850,
+    "very_good": 755,
+    "good": 640,
+    "fair": 490
+  },
+  "iPhone 16 Pro Max 1TB": {
+    "new": 1440,
+    "excellent": 1220,
+    "very_good": 1080,
+    "good": 920,
+    "fair": 710
+  },
+  "iPhone 16 Pro 1TB": {
+    "new": 1340,
+    "excellent": 1140,
+    "very_good": 1010,
+    "good": 855,
+    "fair": 660
+  },
+  "iPhone 16e 128GB": {
+    "new": 540,
+    "excellent": 460,
+    "very_good": 405,
+    "good": 345,
+    "fair": 260
+  },
+  "iPhone 16e 256GB": {
+    "new": 640,
+    "excellent": 540,
+    "very_good": 480,
+    "good": 405,
+    "fair": 310
+  },
+  "iPhone 17 512GB": {
+    "new": 1080,
+    "excellent": 920,
+    "very_good": 815,
+    "good": 690,
+    "fair": 530
+  },
+  "iPhone 17 Air 256GB": {
+    "new": 980,
+    "excellent": 830,
+    "very_good": 735,
+    "good": 625,
+    "fair": 480
+  },
+  "iPhone 17 Plus 512GB": {
+    "new": 1120,
+    "excellent": 950,
+    "very_good": 845,
+    "good": 715,
+    "fair": 550
+  },
+  "iPhone 17 Pro 1TB": {
+    "new": 1440,
+    "excellent": 1220,
+    "very_good": 1080,
+    "good": 920,
+    "fair": 710
+  },
+  "iPhone 17 Pro Max 1TB": {
+    "new": 1540,
+    "excellent": 1310,
+    "very_good": 1160,
+    "good": 985,
+    "fair": 760
   }
 }

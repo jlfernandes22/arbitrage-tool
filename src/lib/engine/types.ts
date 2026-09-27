@@ -133,6 +133,25 @@ export interface TaskSummary {
   bestProfitEur: number;
   bestMarginPct: number;
 }
+/**
+ * Per-scraper outcome for a single task. Surfaced in the UI as a
+ * "Scraper Results" panel so the user can instantly see WHICH site
+ * produced data, which returned zero results, and which failed —
+ * with the underlying reason for debugging.
+ */
+export interface ScraperStatus {
+  site: "goofish" | "olx" | "vinted" | "kuantokusta" | "amazon";
+  label: string; // display name, e.g. "Goofish (闲鱼)"
+  // ok       — returned N > 0 results
+  // empty    — completed but returned 0 results
+  // blocked  — anti-bot system blocked the fetch (Baxia / Cloudflare / Akamai / Datadome)
+  // error    — crashed (network, timeout, parse error)
+  // skipped  — disabled by user config
+  status: "ok" | "empty" | "blocked" | "error" | "skipped";
+  count: number; // listings / comps extracted
+  detail?: string; // human-readable reason / live fetch status
+  durationMs?: number; // how long the scraper took
+}
 export interface TaskResult {
   taskId: string;
   query: string;
@@ -142,6 +161,7 @@ export interface TaskResult {
   summary: TaskSummary;
   warnings: string[];
   degraded: boolean; // true if scrapers fell back to mock/manual mode
+  scraperStatuses?: ScraperStatus[]; // per-site outcome breakdown
   createdAt: string;
   finishedAt?: string;
 }

@@ -130,6 +130,19 @@ export interface TaskSummary {
   bestProfitEur: number;
   bestMarginPct: number;
 }
+/**
+ * Per-scraper outcome — mirrors the server-side ScraperStatus from
+ * lib/engine/types. Lets the UI show exactly which sites produced data,
+ * which returned nothing, and which were blocked (with the reason).
+ */
+export interface ScraperStatus {
+  site: "goofish" | "olx" | "vinted" | "kuantokusta" | "amazon";
+  label: string;
+  status: "ok" | "empty" | "blocked" | "error" | "skipped";
+  count: number;
+  detail?: string;
+  durationMs?: number;
+}
 export interface TaskResult {
   taskId: string;
   query: string;
@@ -139,6 +152,7 @@ export interface TaskResult {
   summary: TaskSummary;
   warnings: string[];
   degraded: boolean;
+  scraperStatuses?: ScraperStatus[];
   createdAt: string;
   finishedAt?: string;
 }
@@ -291,6 +305,11 @@ export const BRAND_CATALOG: Brand[] = [
       {
         id: "iphone", category: "iphone", label: "iPhone", emoji: "📱", hasStorage: true, hasRangeFilter: false,
         generations: [
+          gen("iphone-18", "iPhone 18 Series", "2026", [
+            ["iPhone 18", "iPhone 18"], ["iPhone 18 Pro", "iPhone 18 Pro"],
+            ["iPhone 18 Pro Max", "iPhone 18 Pro Max"], ["iPhone 18 Plus", "iPhone 18 Plus"],
+            ["iPhone 18 Air", "iPhone 18 Air"],
+          ]),
           gen("iphone-17", "iPhone 17 Series", "2025", [
             ["iPhone 17", "iPhone 17"], ["iPhone 17 Pro", "iPhone 17 Pro"],
             ["iPhone 17 Pro Max", "iPhone 17 Pro Max"], ["iPhone 17 Plus", "iPhone 17 Plus"],
@@ -299,6 +318,7 @@ export const BRAND_CATALOG: Brand[] = [
           gen("iphone-16", "iPhone 16 Series", "2024", [
             ["iPhone 16", "iPhone 16"], ["iPhone 16 Pro", "iPhone 16 Pro"],
             ["iPhone 16 Pro Max", "iPhone 16 Pro Max"], ["iPhone 16 Plus", "iPhone 16 Plus"],
+            ["iPhone 16e", "iPhone 16e"],
           ]),
           gen("iphone-15", "iPhone 15 Series", "2023", [
             ["iPhone 15", "iPhone 15"], ["iPhone 15 Plus", "iPhone 15 Plus"],
@@ -311,6 +331,25 @@ export const BRAND_CATALOG: Brand[] = [
           gen("iphone-13", "iPhone 13 Series", "2021", [
             ["iPhone 13 Mini", "iPhone 13 Mini"], ["iPhone 13", "iPhone 13"],
             ["iPhone 13 Pro", "iPhone 13 Pro"], ["iPhone 13 Pro Max", "iPhone 13 Pro Max"],
+          ]),
+          gen("iphone-12", "iPhone 12 Series", "2020", [
+            ["iPhone 12 Mini", "iPhone 12 Mini"], ["iPhone 12", "iPhone 12"],
+            ["iPhone 12 Pro", "iPhone 12 Pro"], ["iPhone 12 Pro Max", "iPhone 12 Pro Max"],
+          ]),
+          gen("iphone-11", "iPhone 11 Series", "2019", [
+            ["iPhone 11", "iPhone 11"],
+            ["iPhone 11 Pro", "iPhone 11 Pro"], ["iPhone 11 Pro Max", "iPhone 11 Pro Max"],
+          ]),
+          gen("iphone-xs", "iPhone XS / XR Series", "2018", [
+            ["iPhone XS", "iPhone XS"], ["iPhone XS Max", "iPhone XS Max"],
+            ["iPhone XR", "iPhone XR"],
+          ]),
+          gen("iphone-x", "iPhone X", "2017", [
+            ["iPhone X", "iPhone X"],
+          ]),
+          gen("iphone-se", "iPhone SE", "2020", [
+            ["iPhone SE 2022 (3rd gen)", "iPhone SE 2022"],
+            ["iPhone SE 2020 (2nd gen)", "iPhone SE 2020"],
           ]),
         ],
       },
@@ -1638,6 +1677,11 @@ const RELEASE_DATE_OVERRIDES: Record<string, string> = {
   "iphone-15": "2023",
   "iphone-14": "2022",
   "iphone-13": "2021",
+  "iphone-12": "2020",
+  "iphone-11": "2019",
+  "iphone-xs": "2018",
+  "iphone-x": "2017",
+  "iphone-se": "2020",
   // Apple — MacBook
   "macbook-m5": "2025",
   "macbook-m4": "2024",
@@ -1779,12 +1823,32 @@ const MODEL_RELEASE_DATES: Record<string, string> = {
   "iPhone 16 Pro": "2024",
   "iPhone 16 Pro Max": "2024",
   "iPhone 16 Plus": "2024",
+  "iPhone 16e": "2025",
   "iPhone 15": "2023",
   "iPhone 15 Pro": "2023",
   "iPhone 15 Pro Max": "2023",
+  "iPhone 15 Plus": "2023",
   "iPhone 14": "2022",
   "iPhone 14 Pro": "2022",
+  "iPhone 14 Pro Max": "2022",
+  "iPhone 14 Plus": "2022",
   "iPhone 13": "2021",
+  "iPhone 13 Mini": "2021",
+  "iPhone 13 Pro": "2021",
+  "iPhone 13 Pro Max": "2021",
+  "iPhone 12 Mini": "2020",
+  "iPhone 12": "2020",
+  "iPhone 12 Pro": "2020",
+  "iPhone 12 Pro Max": "2020",
+  "iPhone 11": "2019",
+  "iPhone 11 Pro": "2019",
+  "iPhone 11 Pro Max": "2019",
+  "iPhone XS": "2018",
+  "iPhone XS Max": "2018",
+  "iPhone XR": "2018",
+  "iPhone X": "2017",
+  "iPhone SE 2020": "2020",
+  "iPhone SE 2022": "2022",
   // Samsung Galaxy A series (different years)
   "Samsung Galaxy A56": "2025",
   "Samsung Galaxy A55": "2024",

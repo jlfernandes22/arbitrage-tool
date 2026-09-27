@@ -42,6 +42,14 @@ const FAMILY_PATTERNS: FamilyPattern[] = [
   // "iPhone 5s" ≠ "iPhone 5"), so they're kept in the marker value;
   // tier words (plus/mini/pro/max/air) are NOT (a "15 Pro" is still a 15).
   { family: "iphone", brand: "apple", pattern: /\biphone\s*(\d{1,2}[es]?)(?:plus|mini|pro|max|air)?\b/i },
+  // Letter-named generations carry no digits, so the numeric pattern above
+  // can't see them. Each gets its own marker so "iPhone XS" queries reject
+  // "iPhone 15" titles (and vice versa). Order matters: XS/XR/SE are tried
+  // before the bare X so "iphone xs" never yields a plain "x" marker.
+  { family: "iphone", brand: "apple", pattern: /\biphone\s*(xs)\s*(?:max|plus)?\b/i },
+  { family: "iphone", brand: "apple", pattern: /\biphone\s*(xr)\b/i },
+  { family: "iphone", brand: "apple", pattern: /\biphone\s*(se)\s*(?:\d{4}|gen(?:eration)?\s*\d|第[二三]代|[23](?:rd|nd|rd)?)?\b/i },
+  { family: "iphone", brand: "apple", pattern: /\biphone\s*(x|10)\b/i },
   // Chip patterns allow an optional screen-size spec between the model word
   // and the chip ("MacBook Pro 14-inch M4", "iPad Pro 11-inch M2").
   { family: "ipad", brand: "apple", pattern: /\bipad\s*(?:pro|air|mini)?\s*(?:\d{1,2}(?:\.\d)?-?\s*(?:in|inch|")\s*)?m([1-9])\b/i },

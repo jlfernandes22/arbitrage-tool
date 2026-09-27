@@ -69,7 +69,26 @@ const IPHONE_MODELS: Array<{
   // iPhone 12 series
   { re: /(?:iphone|苹果)\s*12\s*pro\s*max/i, family: "iPhone 12 Pro Max", model: "iPhone 12 Pro Max" },
   { re: /(?:iphone|苹果)\s*12\s*pro/i, family: "iPhone 12 Pro", model: "iPhone 12 Pro" },
+  { re: /(?:iphone|苹果)\s*12\s*mini/i, family: "iPhone 12 Mini", model: "iPhone 12 Mini" },
   { re: /(?:iphone|苹果)\s*12/i, family: "iPhone 12", model: "iPhone 12" },
+  // iPhone 11 series
+  { re: /(?:iphone|苹果)\s*11\s*pro\s*max/i, family: "iPhone 11 Pro Max", model: "iPhone 11 Pro Max" },
+  { re: /(?:iphone|苹果)\s*11\s*pro/i, family: "iPhone 11 Pro", model: "iPhone 11 Pro" },
+  { re: /(?:iphone|苹果)\s*11/i, family: "iPhone 11", model: "iPhone 11" },
+  // iPhone XS / XS Max / XR (2018) — XS before XR before X (longest first)
+  { re: /(?:iphone|苹果)\s*xs\s*max/i, family: "iPhone XS Max", model: "iPhone XS Max" },
+  { re: /(?:iphone|苹果)\s*xs/i, family: "iPhone XS", model: "iPhone XS" },
+  { re: /(?:iphone|苹果)\s*xr/i, family: "iPhone XR", model: "iPhone XR" },
+  // iPhone SE (2nd gen 2020 / 3rd gen 2022) — match BEFORE bare X,
+  // and disambiguate by year when the title includes one.
+  { re: /(?:iphone|苹果)\s*se\s*(?:3|三代|三|2022|第三代)/i, family: "iPhone SE 2022", model: "iPhone SE 2022" },
+  { re: /(?:iphone|苹果)\s*se\s*(?:2|二代|二|2020|第二代)/i, family: "iPhone SE 2020", model: "iPhone SE 2020" },
+  { re: /(?:iphone|苹果)\s*se/i, family: "iPhone SE 2022", model: "iPhone SE 2022" },
+  // iPhone X (2017) — LAST so "XS"/"XR" patterns above win
+  { re: /(?:iphone|苹果)\s*x(?![a-z0-9])/i, family: "iPhone X", model: "iPhone X" },
+  // Chinese nickname "苹果X" is covered above; also handle "iPhone 10"
+  // (rare but seen on Goofish) as iPhone X.
+  { re: /(?:iphone|苹果)\s*10(?![a-z0-9])/i, family: "iPhone X", model: "iPhone X" },
 ];
 // MacBook detection
 const MACBOOK_MODELS: Array<{

@@ -23,6 +23,7 @@ import {
   type EvaluatedListing,
   type EuMarketComp,
   type GoofishListing,
+  type ScraperStatus,
   type TaskResult,
   type TaskSummary,
 } from "@/lib/engine";
@@ -267,6 +268,46 @@ async function runPipelineInner(taskId: string, gen: number): Promise<void> {
     }, 3000);
     const warnings: string[] = [];
     let degraded = false;
+    // ── Per-scraper status collection ────────────────────────────────
+    // Every site's outcome (ok / empty / blocked / error / skipped) is
+    // recorded with its count + reason, then surfaced in the UI so the
+    // user can see exactly which scrapers produced data and which failed.
+    const scraperStatuses: ScraperStatus[] = [];
+    const siteTimers: Record<string, number> = {};
+    const siteStart = (site: string) => { siteTimers[site] = Date.now(); };
+    const siteEnd = (site: string) =>
+      siteTimers[site] ? Date.now() - siteTimers[site] : undefined;
+    // Classify a scraper's liveFetchStatus string into blocked vs error.
+    // Anti-bot markers in the status/warning text → "blocked"; anything
+    // else with 0 results and a failure marker → "error".
+    const classifySite = (statusText: string | undefined, warning: string | undefined): ScraperStatus["status"] => {
+      const combined = `${statusText ?? ""} ${warning ?? ""}`;
+      if (/blocked|block page|cloudflare|akamai|datadome|captcha|access denied|client challenge|403|baxia/i.test(combined)) return "blocked";
+      if (/failed|error|timeout|timed out|ENOTFOUND|ECONNREFUSED|abort/i.test(combined)) return "error";
+      return "empty";
+    };
+    const recordSite = (
+      site: ScraperStatus["site"],
+      label: string,
+      count: number,
+      statusText: string | undefined,
+      warning: string | undefined,
+      skipped = false,
+    ) => {
+      const status: ScraperStatus["status"] = skipped
+        ? "skipped"
+        : count > 0
+          ? "ok"
+          : classifySite(statusText, warning);
+      scraperStatuses.push({
+        site,
+        label,
+        status,
+        count,
+        detail: skipped ? "Disabled by user config" : (warning ?? statusText ?? undefined),
+        durationMs: siteEnd(site),
+      });
+    };
     // Forex (needed for profit calc, fetch in parallel with scrapers).
     // Pass the task's RESOLVED rate so the user's UI override is honored
     // when the live API is unreachable.
@@ -280,6 +321,7 @@ async function runPipelineInner(taskId: string, gen: number): Promise<void> {
           ? ` [Filter: ${minPrice > 0 ? `¥${minPrice} (~€${Math.round(minPrice * cfg.forex.cny_to_eur_rate)})` : "¥0"} - ${maxPrice > 0 ? `¥${maxPrice} (~€${Math.round(maxPrice * cfg.forex.cny_to_eur_rate)})` : "∞"}]`
           : "";
 
+      siteStart("goofish");
       if (state.manualHtml && state.manualHtml.trim().length > 0) {
         appendLog(taskId, "INFO", `[Goofish] Manual paste mode${priceFilterInfo}`);
         const { parseManualPasteHtml } = await import("@/lib/scrapers/goofish");
@@ -295,6 +337,7 @@ async function runPipelineInner(taskId: string, gen: number): Promise<void> {
         });
         siteProgress.goofish.status = "done";
         siteProgress.goofish.count = parsed.length;
+        recordSite("goofish", "Goofish (闲鱼)", parsed.length, `Manual paste: ${parsed.length} listings`, undefined);
         return parsed;
       }
       appendLog(taskId, "INFO", `[Goofish] Searching goofish.com for "${state.query}" (up to ${goofishPages} pages)${priceFilterInfo}…`);
@@ -315,12 +358,14 @@ async function runPipelineInner(taskId: string, gen: number): Promise<void> {
       });
       siteProgress.goofish.status = "done";
       siteProgress.goofish.count = r.listings.length;
+      recordSite("goofish", "Goofish (闲鱼)", r.listings.length, r.liveFetchStatus, r.blocked ? "Goofish blocked the search (Baxia CAPTCHA) — Manual Paste recommended" : r.warning);
       return r.listings;
     })();
     // ── OLX (EU comps) — skippable via config flag ──
     const olxPromise: Promise<EuMarketComp[]> = skipOlx
       ? Promise.resolve([])
       : (async () => {
+          siteStart("olx");
           appendLog(taskId, "INFO", `[OLX] Searching olx.pt for "${state.query}" (up to ${olxPages} pages)…`);
           const r = await scrapeOlx(null, state.query, { maxPages: olxPages });
           if (r.liveFetchStatus) appendLog(taskId, "INFO", `[OLX] ${r.liveFetchStatus}`);
@@ -332,15 +377,18 @@ async function runPipelineInner(taskId: string, gen: number): Promise<void> {
           if (r.degraded) degraded = true;
           siteProgress.olx.status = "done";
           siteProgress.olx.count = r.comps.length;
+          recordSite("olx", "OLX.pt", r.comps.length, r.liveFetchStatus, r.warning);
           return r.comps;
         })();
     if (skipOlx) {
+      recordSite("olx", "OLX.pt", 0, undefined, undefined, true);
       appendLog(taskId, "INFO", "[OLX] Skipped by user (skip_olx=true) — proceeding with Vinted-only comparison");
     }
     // ── Vinted (EU comps) — skippable via config flag ──
     const vintedPromise: Promise<EuMarketComp[]> = skipVinted
       ? Promise.resolve([])
       : (async () => {
+          siteStart("vinted");
           appendLog(taskId, "INFO", `[Vinted] Searching vinted.pt for "${state.query}" (up to ${vintedPages} pages)…`);
           const r = await scrapeVinted(null, state.query, { maxPages: vintedPages });
           if (r.liveFetchStatus) appendLog(taskId, "INFO", `[Vinted] ${r.liveFetchStatus}`);
@@ -352,9 +400,11 @@ async function runPipelineInner(taskId: string, gen: number): Promise<void> {
           if (r.degraded) degraded = true;
           siteProgress.vinted.status = "done";
           siteProgress.vinted.count = r.comps.length;
+          recordSite("vinted", "Vinted.pt", r.comps.length, r.liveFetchStatus, r.warning);
           return r.comps;
         })();
     if (skipVinted) {
+      recordSite("vinted", "Vinted.pt", 0, undefined, undefined, true);
       appendLog(taskId, "INFO", "[Vinted] Skipped by user (skip_vinted=true) — proceeding with OLX-only comparison");
     }
     // ── KuantoKusta (NEW retail comps) — skippable via config flag ──
@@ -365,6 +415,7 @@ async function runPipelineInner(taskId: string, gen: number): Promise<void> {
     const kkPromise: Promise<EuMarketComp[]> = skipKk
       ? Promise.resolve([])
       : (async () => {
+          siteStart("kuantokusta");
           appendLog(taskId, "INFO", `[KuantoKusta] Searching kuantokusta.pt for "${state.query}" (up to ${kkPages} pages)…`);
           const r = await scrapeKuantokusta(null, state.query, { maxPages: kkPages });
           if (r.liveFetchStatus) appendLog(taskId, "INFO", `[KuantoKusta] ${r.liveFetchStatus}`);
@@ -376,9 +427,11 @@ async function runPipelineInner(taskId: string, gen: number): Promise<void> {
           if (r.degraded) degraded = true;
           siteProgress.kk.status = "done";
           siteProgress.kk.count = r.comps.length;
+          recordSite("kuantokusta", "KuantoKusta.pt", r.comps.length, r.liveFetchStatus, r.warning);
           return r.comps;
         })();
     if (skipKk) {
+      recordSite("kuantokusta", "KuantoKusta.pt", 0, undefined, undefined, true);
       appendLog(taskId, "INFO", "[KuantoKusta] Skipped by user (skip_kuantokusta=true or skip_new=true)");
     }
     // ── Amazon.es (NEW retail comps) — skippable via config flag ──
@@ -388,6 +441,7 @@ async function runPipelineInner(taskId: string, gen: number): Promise<void> {
     const amazonPromise: Promise<EuMarketComp[]> = skipAmazon
       ? Promise.resolve([])
       : (async () => {
+          siteStart("amazon");
           appendLog(taskId, "INFO", `[Amazon] Searching amazon.es for "${state.query}" (up to ${amazonPages} pages)…`);
           const r = await scrapeAmazon(null, state.query, { maxPages: amazonPages });
           if (r.liveFetchStatus) appendLog(taskId, "INFO", `[Amazon] ${r.liveFetchStatus}`);
@@ -399,9 +453,11 @@ async function runPipelineInner(taskId: string, gen: number): Promise<void> {
           if (r.degraded) degraded = true;
           siteProgress.amazon.status = "done";
           siteProgress.amazon.count = r.comps.length;
+          recordSite("amazon", "Amazon.es", r.comps.length, r.liveFetchStatus, r.warning);
           return r.comps;
         })();
     if (skipAmazon) {
+      recordSite("amazon", "Amazon.es", 0, undefined, undefined, true);
       appendLog(taskId, "INFO", "[Amazon] Skipped by user (skip_amazon=true or skip_new=true)");
     }
     // Wait for all scrapers to finish concurrently
@@ -416,6 +472,22 @@ async function runPipelineInner(taskId: string, gen: number): Promise<void> {
     ]);
     // Stop the per-site progress updates — all scrapers are done
     stopProgress();
+    // Guard: a scraper promise that REJECTED (should never happen — every
+    // scraper catches internally) would leave its site unrecorded. Fill any
+    // gap with an error status so the UI always shows all five sites.
+    const recordedSites = new Set(scraperStatuses.map((s) => s.site));
+    const siteLabels: Record<ScraperStatus["site"], string> = {
+      goofish: "Goofish (闲鱼)",
+      olx: "OLX.pt",
+      vinted: "Vinted.pt",
+      kuantokusta: "KuantoKusta.pt",
+      amazon: "Amazon.es",
+    };
+    (Object.keys(siteLabels) as ScraperStatus["site"][]).forEach((site) => {
+      if (!recordedSites.has(site)) {
+        scraperStatuses.push({ site, label: siteLabels[site], status: "error", count: 0, detail: "Scraper crashed before reporting" });
+      }
+    });
     // Defensive guard: scraper should always return an array, but if corrupted
     // data somehow produced a plain object, ensureArray prevents .map() crashes.
     let listings = ensureArray(goofishListings);
@@ -458,6 +530,13 @@ async function runPipelineInner(taskId: string, gen: number): Promise<void> {
       compsByListing.set(l.id, relevant);
     }
     appendLog(taskId, "SUCCESS", `Scraping complete — ${listings.length} Goofish listings, ${olxComps.length} OLX, ${vintedComps.length} Vinted, ${kkComps.length} KuantoKusta (new), ${amazonComps.length} Amazon (new)`);
+    // Per-scraper status summary line so the terminal console shows which
+    // sites produced data and which failed at a glance.
+    scraperStatuses.forEach((s) => {
+      const icon = s.status === "ok" ? "✅" : s.status === "empty" ? "⚠️" : s.status === "blocked" ? "🚫" : s.status === "error" ? "❌" : "⏭️";
+      const secs = s.durationMs ? ` (${(s.durationMs / 1000).toFixed(1)}s)` : "";
+      appendLog(taskId, s.status === "ok" ? "SUCCESS" : "WARN", `[ScraperStatus] ${icon} ${s.label}: ${s.status.toUpperCase()} — ${s.count} results${secs}${s.detail ? ` | ${s.detail.substring(0, 140)}` : ""}`);
+    });
     patch({ progress: 70, step: "Calculating landed cost & profitability…", warnings, degraded });
     // ---------- Phase 3: Calculating ----------
     patch({ status: "calculating", progress: 75 });
@@ -517,6 +596,7 @@ async function runPipelineInner(taskId: string, gen: number): Promise<void> {
       summary,
       warnings,
       degraded,
+      scraperStatuses,
       createdAt: new Date(state.startedAt).toISOString(),
       finishedAt: new Date().toISOString(),
     };
