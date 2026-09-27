@@ -1,8 +1,9 @@
 "use client";
 import { useEffect, useState, useCallback, useRef } from "react";
-import { TrendingUp, Loader2, Search } from "lucide-react";
+import { TrendingUp, Loader2, Search, X, GitCompareArrows } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
 
 interface TrendPoint {
   taskId: string;
@@ -31,12 +32,23 @@ interface Suggestion {
   lastScanned: string;
 }
 
+/** A comparison series overlaid on the primary product's chart. */
+interface CompareSeries {
+  query: string;
+  points: TrendPoint[];
+}
+
 // Strip storage suffix (e.g. "256GB", "128GB", "1TB") from a query so that
 // "iPhone 15 Pro 256GB" → "iPhone 15 Pro". This ensures the trend search
 // matches ALL storage variants of the same product.
 function stripStorage(q: string): string {
   return q.replace(/\s*\d+\s*(?:GB|TB)\s*$/i, "").trim();
 }
+
+// Series palette — primary keeps emerald (the app's signal color); up to 3
+// comparison series get visually distinct hues, all legible on light+dark.
+const SERIES_COLORS = ["#10b981", "#0ea5e9", "#f59e0b", "#f43f5e"];
+const MAX_COMPARE = 3;
 
 export function ProductTrend({ defaultQuery, refreshKey }: { defaultQuery?: string; refreshKey?: number }) {
   const initialQuery = defaultQuery ? stripStorage(defaultQuery) : "";
@@ -45,6 +57,9 @@ export function ProductTrend({ defaultQuery, refreshKey }: { defaultQuery?: stri
   const [data, setData] = useState<TrendResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Comparison series overlaid on the chart (up to MAX_COMPARE).
+  const [compare, setCompare] = useState<CompareSeries[]>([]);
+  const [compareLoading, setCompareLoading] = useState<string | null>(null);
   // Autocomplete suggestions
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -55,6 +70,9 @@ export function ProductTrend({ defaultQuery, refreshKey }: { defaultQuery?: stri
   // a slow earlier response must not overwrite a newer product's data.
   const trendSeqRef = useRef(0);
   const suggestSeqRef = useRef(0);
+  const compareSeqRef = useRef(0);
+  // Per-query trend cache — re-adding a removed series is instant.
+  const compareCache = useRef<Map<string, TrendPoint[]>>(new Map());
 
   const fetchTrend = useCallback(async (q: string) => {
     if (!q.trim()) return;
@@ -109,12 +127,60 @@ export function ProductTrend({ defaultQuery, refreshKey }: { defaultQuery?: stri
     }
   }, []);
 
-  // Auto-fetch trend when defaultQuery or refreshKey changes
+  // Fetch one comparison series and append it (dedup + cap enforced here).
+  const fetchCompare = useCallback(async (rawQ: string) => {
+    const cleanQ = stripStorage(rawQ);
+    if (!cleanQ) return;
+    if (cleanQ === activeQuery) {
+      toast.info("That's already the main chart series — search another product to compare.");
+      return;
+    }
+    if (compare.some((c) => c.query === cleanQ)) {
+      toast.info(`"${cleanQ}" is already on the chart.`);
+      return;
+    }
+    if (compare.length >= MAX_COMPARE) {
+      toast.warning(`Comparison is capped at ${MAX_COMPARE} extra products — remove one first.`);
+      return;
+    }
+    const seq = ++compareSeqRef.current;
+    setCompareLoading(cleanQ);
+    try {
+      let points = compareCache.current.get(cleanQ);
+      if (!points) {
+        const res = await fetch(`/api/tasks/trend?query=${encodeURIComponent(cleanQ)}`);
+        if (seq !== compareSeqRef.current) return;
+        if (!res.ok) throw new Error("fetch failed");
+        const json: TrendResponse = await res.json();
+        if (seq !== compareSeqRef.current) return;
+        points = json.trend ?? [];
+        compareCache.current.set(cleanQ, points);
+      }
+      if (points.length === 0) {
+        toast.info(`No scan history for "${cleanQ}" — run a scan with this product first.`);
+        return;
+      }
+      setCompare((prev) => {
+        if (prev.some((c) => c.query === cleanQ)) return prev; // re-check under the lock
+        if (prev.length >= MAX_COMPARE) return prev;
+        return [...prev, { query: cleanQ, points }];
+      });
+    } catch {
+      if (seq === compareSeqRef.current) toast.error(`Could not load trend for "${cleanQ}".`);
+    } finally {
+      if (seq === compareSeqRef.current) setCompareLoading(null);
+    }
+  }, [activeQuery, compare]);
+
+  // Auto-fetch trend when defaultQuery or refreshKey changes; a NEW primary
+  // product invalidates the comparison overlay (stale mixes mislead).
   useEffect(() => {
     const cleaned = defaultQuery ? stripStorage(defaultQuery) : "";
     if (cleaned) {
       setQuery(cleaned);
       setActiveQuery(cleaned);
+      setCompare([]);
+      compareSeqRef.current++; // cancel in-flight comparison fetches
       fetchTrend(cleaned);
     }
   }, [defaultQuery, refreshKey]);
@@ -168,9 +234,14 @@ export function ProductTrend({ defaultQuery, refreshKey }: { defaultQuery?: stri
     }
   };
 
-  // Calculate min/max for chart scaling
+  // Calculate min/max for chart scaling — ACROSS all visible series so the
+  // overlay lines share one honest Y scale.
   const points = Array.isArray(data?.trend) ? data.trend : [];
-  const profits = points.map((p) => p.medianProfitEur).filter((v) => v !== 0);
+  const allSeries: Array<{ query: string; points: TrendPoint[]; colorIdx: number }> = [
+    { query: activeQuery, points, colorIdx: 0 },
+    ...compare.map((c, ci) => ({ query: c.query, points: c.points, colorIdx: ci + 1 })),
+  ];
+  const profits = allSeries.flatMap((s) => s.points.map((p) => p.medianProfitEur)).filter((v) => v !== 0);
   const maxProfit = profits.length > 0 ? Math.max(...profits) : 0;
   const minProfit = profits.length > 0 ? Math.min(...profits, 0) : 0;
   const range = maxProfit - minProfit || 1;
@@ -188,9 +259,12 @@ export function ProductTrend({ defaultQuery, refreshKey }: { defaultQuery?: stri
         </span>
       </div>
 
-      {/* Search bar with autocomplete */}
-      <form onSubmit={handleSubmit} className="mb-1 flex gap-2">
-        <div className="relative flex-1 max-w-md">
+      {/* Search bar with autocomplete + compare action */}
+      <form
+        onSubmit={handleSubmit}
+        className="mb-1 flex flex-wrap gap-2"
+      >
+        <div className="relative min-w-0 flex-1 max-w-md basis-52">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
             type="text"
@@ -227,9 +301,26 @@ export function ProductTrend({ defaultQuery, refreshKey }: { defaultQuery?: stri
           {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <TrendingUp className="h-3.5 w-3.5" />}
           {loading ? "Loading…" : "Show Trend"}
         </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-9 gap-1.5"
+          disabled={!query.trim() || compareLoading != null}
+          onClick={() => void fetchCompare(query)}
+          title={`Overlay "${stripStorage(query) || "this product"}" on the chart to compare against the main series (up to ${MAX_COMPARE})`}
+        >
+          {compareLoading === stripStorage(query) ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <GitCompareArrows className="h-3.5 w-3.5" />
+          )}
+          Compare
+        </Button>
       </form>
       <p className="mb-3 text-[9px] text-muted-foreground">
-        Storage variants are automatically included — searching &quot;iPhone 15 Pro&quot; matches all sizes (128GB, 256GB, etc.)
+        Storage variants are automatically included — searching &quot;iPhone 15 Pro&quot; matches all sizes (128GB, 256GB, etc.).
+        Use <span className="font-semibold">Compare</span> to overlay other products on the same chart.
       </p>
 
       {error && (
@@ -293,9 +384,40 @@ export function ProductTrend({ defaultQuery, refreshKey }: { defaultQuery?: stri
                   </span>
                 </div>
               </div>
+              {/* Series legend — color chip per product, removable */}
+              {allSeries.length > 1 && (
+                <div className="mb-2 flex flex-wrap items-center gap-1.5">
+                  {allSeries.map((s) => (
+                    <span
+                      key={s.query}
+                      className="inline-flex items-center gap-1 rounded-full border bg-background px-2 py-0.5 text-[10px] font-medium"
+                      title={`Median profit series for "${s.query}"`}
+                    >
+                      <span
+                        className="h-2 w-2 shrink-0 rounded-full"
+                        style={{ backgroundColor: SERIES_COLORS[s.colorIdx] }}
+                        aria-hidden
+                      />
+                      <span className="max-w-[140px] truncate">{s.query}</span>
+                      {s.colorIdx !== 0 && (
+                        <button
+                          type="button"
+                          aria-label={`Remove ${s.query} from comparison`}
+                          className="ml-0.5 rounded-full p-0.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                          onClick={() =>
+                            setCompare((prev) => prev.filter((c) => c.query !== s.query))
+                          }
+                        >
+                          <X className="h-2.5 w-2.5" aria-hidden />
+                        </button>
+                      )}
+                    </span>
+                  ))}
+                </div>
+              )}
               <div className="relative h-40 w-full">
                 <svg
-                  viewBox={`0 0 ${Math.max(points.length * 60, 300)} 160`}
+                  viewBox={`0 0 ${Math.max(Math.max(...allSeries.map((s) => s.points.length)) * 60, 300)} 160`}
                   className="h-full w-full"
                   preserveAspectRatio="xMidYMid meet"
                 >
@@ -303,66 +425,120 @@ export function ProductTrend({ defaultQuery, refreshKey }: { defaultQuery?: stri
                   <line
                     x1="0"
                     y1={((maxProfit - 0) / range) * 140 + 10}
-                    x2={Math.max(points.length * 60, 300)}
+                    x2={Math.max(Math.max(...allSeries.map((s) => s.points.length)) * 60, 300)}
                     y2={((maxProfit - 0) / range) * 140 + 10}
                     stroke="currentColor"
                     strokeWidth="0.5"
                     strokeDasharray="4 4"
                     className="text-muted-foreground/30"
                   />
-                  {/* Profit line */}
-                  <polyline
-                    points={points
-                      .map((p, i) => {
-                        const x = i * 60 + 30;
-                        const y = ((maxProfit - r(p.medianProfitEur)) / range) * 140 + 10;
-                        return `${x},${y}`;
-                      })
-                      .join(" ")}
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    className="text-emerald-500"
-                  />
-                  {/* Data points */}
-                  {points.map((p, i) => {
-                    const x = i * 60 + 30;
-                    const profit = r(p.medianProfitEur);
-                    const y = ((maxProfit - profit) / range) * 140 + 10;
-                    // Labels above a point clip at the chart's top edge when
-                    // the point sits near the top (y < 20) — flip below it.
-                    const labelY = y < 20 ? y + 16 : y - 8;
+                  {/* One polyline per series (primary first so comparisons draw on top) */}
+                  {allSeries.map((s) => {
+                    const color = SERIES_COLORS[s.colorIdx] ?? SERIES_COLORS[0];
+                    const stepCount = Math.max(s.points.length - 1, 1);
+                    const chartW = Math.max(Math.max(...allSeries.map((x) => x.points.length)) * 60, 300);
+                    const step = (chartW - 60) / stepCount;
                     return (
-                      <g key={p.taskId}>
-                        <circle
-                          cx={x}
-                          cy={y}
-                          r="4"
-                          fill="currentColor"
-                          className={profit >= 0 ? "text-emerald-500" : "text-rose-500"}
+                      <g key={s.query}>
+                        {/* Gradient area fill under the PRIMARY series only —
+                            comparisons stay as clean lines to avoid mud */}
+                        {s.colorIdx === 0 && (
+                          <polygon
+                            points={[
+                              `0,${((maxProfit - 0) / range) * 140 + 10}`,
+                              ...s.points.map((p, i) => {
+                                const x = 30 + i * step;
+                                const y = ((maxProfit - r(p.medianProfitEur)) / range) * 140 + 10;
+                                return `${x.toFixed(1)},${y.toFixed(1)}`;
+                              }),
+                              `${(30 + (s.points.length - 1) * step).toFixed(1)},${((maxProfit - 0) / range) * 140 + 10}`,
+                            ].join(" ")}
+                            fill={color}
+                            opacity="0.07"
+                          />
+                        )}
+                        <polyline
+                          points={s.points
+                            .map((p, i) => {
+                              const x = 30 + i * step;
+                              const y = ((maxProfit - r(p.medianProfitEur)) / range) * 140 + 10;
+                              return `${x.toFixed(1)},${y.toFixed(1)}`;
+                            })
+                            .join(" ")}
+                          fill="none"
+                          stroke={color}
+                          strokeWidth={s.colorIdx === 0 ? 2 : 1.5}
+                          strokeDasharray={s.colorIdx === 0 ? undefined : "5 3"}
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          opacity={s.colorIdx === 0 ? 1 : 0.9}
                         />
-                        <text
-                          x={x}
-                          y={labelY}
-                          textAnchor="middle"
-                          className="fill-foreground text-[8px]"
-                        >
-                          €{profit}
-                        </text>
+                        {/* Data points + labels — primary only, so overlaid
+                            series don't clutter the chart */}
+                        {s.colorIdx === 0 &&
+                          s.points.map((p, i) => {
+                            const x = 30 + i * step;
+                            const profit = r(p.medianProfitEur);
+                            const y = ((maxProfit - profit) / range) * 140 + 10;
+                            // Labels above a point clip at the chart's top edge when
+                            // the point sits near the top (y < 20) — flip below it.
+                            const labelY = y < 20 ? y + 16 : y - 8;
+                            return (
+                              <g key={p.taskId}>
+                                <circle
+                                  cx={x}
+                                  cy={y}
+                                  r="4"
+                                  fill={profit >= 0 ? color : "#f43f5e"}
+                                />
+                                <text
+                                  x={x}
+                                  y={labelY}
+                                  textAnchor="middle"
+                                  className="fill-foreground text-[8px]"
+                                >
+                                  €{profit}
+                                </text>
+                              </g>
+                            );
+                          })}
                       </g>
                     );
                   })}
                 </svg>
               </div>
-              {/* X-axis labels */}
-              <div className="mt-1 flex justify-between text-[8px] text-muted-foreground">
-                <span>{new Date(points[0].date).toLocaleDateString("pt-PT", { day: "2-digit", month: "short" })}</span>
-                <span>{new Date(points[points.length - 1].date).toLocaleDateString("pt-PT", { day: "2-digit", month: "short" })}</span>
-              </div>
+              {/* X-axis labels — per visible series when comparing (each has
+                  its own scan dates; a single axis would lie) */}
+              {allSeries.length === 1 ? (
+                <div className="mt-1 flex justify-between text-[8px] text-muted-foreground">
+                  <span>{new Date(points[0].date).toLocaleDateString("pt-PT", { day: "2-digit", month: "short" })}</span>
+                  <span>{new Date(points[points.length - 1].date).toLocaleDateString("pt-PT", { day: "2-digit", month: "short" })}</span>
+                </div>
+              ) : (
+                <div className="mt-1 space-y-0.5">
+                  {allSeries.map((s) => (
+                    <div key={s.query} className="flex items-center gap-1.5 text-[8px] text-muted-foreground">
+                      <span
+                        className="h-1.5 w-1.5 shrink-0 rounded-full"
+                        style={{ backgroundColor: SERIES_COLORS[s.colorIdx] }}
+                        aria-hidden
+                      />
+                      <span className="max-w-[120px] truncate">{s.query}:</span>
+                      <span>
+                        {new Date(s.points[0].date).toLocaleDateString("pt-PT", { day: "2-digit", month: "short" })}
+                        {" → "}
+                        {new Date(s.points[s.points.length - 1].date).toLocaleDateString("pt-PT", { day: "2-digit", month: "short" })}
+                        {" · "}
+                        {s.points.length} scans
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
-          {/* Data table */}
+          {/* Data table — primary series only (comparisons are chart-level) */}
           <div className="max-h-48 overflow-y-auto rounded-lg border">
             <table className="w-full text-xs">
               <thead className="sticky top-0 bg-muted/80 backdrop-blur">

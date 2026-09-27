@@ -35,6 +35,9 @@ import {
   RotateCcw,
   Loader2,
   Timer,
+  HeartPulse,
+  MemoryStick,
+  RefreshCw,
 } from "lucide-react";
 import type { ScraperStatus } from "./types";
 
@@ -102,6 +105,28 @@ interface SiteHealth {
   lastDetail: string | null;
 }
 
+interface SystemHealth {
+  timestamp: string;
+  uptimeSec: number;
+  scanActive: boolean;
+  browsers: { liveChildren: number };
+  memory: { rssMb: number; heapUsedMb: number; heapTotalMb: number };
+  janitor: {
+    sweeps: number;
+    lastSweepAgoSec: number | null;
+    reapedTotal: number;
+    lastReapedAgoSec: number | null;
+    lastReapedCount: number;
+  };
+}
+
+function fmtUptime(sec: number): string {
+  if (sec < 90) return `${sec}s`;
+  if (sec < 5400) return `${Math.round(sec / 60)}m`;
+  if (sec < 172800) return `${(sec / 3600).toFixed(1)}h`;
+  return `${(sec / 86400).toFixed(1)}d`;
+}
+
 function rateColor(rate: number | null): string {
   if (rate === null) return "bg-zinc-300 dark:bg-zinc-700";
   if (rate >= 80) return "bg-emerald-500";
@@ -139,6 +164,28 @@ export function ScraperStatusPanel({
   const [copied, setCopied] = useState(false);
   const [health, setHealth] = useState<SiteHealth[] | null>(null);
   const [healthOpen, setHealthOpen] = useState(false);
+  const [sysHealth, setSysHealth] = useState<SystemHealth | null>(null);
+  const [sysRefreshing, setSysRefreshing] = useState(false);
+
+  // System-health poll: browsers alive, janitor counters, process memory.
+  // Cheap local endpoint; refresh every 30s while mounted so the strip
+  // reflects the post-scan janitor audit without a manual reload.
+  const fetchSysHealth = useCallback(async () => {
+    setSysRefreshing(true);
+    try {
+      const r = await fetch("/api/system/health", { cache: "no-store" });
+      if (r.ok) setSysHealth((await r.json()) as SystemHealth);
+    } catch {
+      // best-effort — the strip just keeps its last known values
+    } finally {
+      setSysRefreshing(false);
+    }
+  }, []);
+  useEffect(() => {
+    void fetchSysHealth();
+    const t = setInterval(() => void fetchSysHealth(), 30_000);
+    return () => clearInterval(t);
+  }, [fetchSysHealth]);
 
   // Load per-site reliability once the panel mounts (after a scan result).
   useEffect(() => {
@@ -167,6 +214,12 @@ export function ScraperStatusPanel({
         lines.push(`- **${h.site}**: ${h.successRate === null ? "no data" : `${h.successRate}% success`} (${h.ok}/${h.scans - h.skipped} scans, avg ${h.avgResults} results)${h.lastDetail ? `\n  - last reason: ${h.lastDetail}` : ""}`);
       }
     }
+    if (sysHealth) {
+      lines.push("", "## System health", "");
+      lines.push(`- uptime: ${fmtUptime(sysHealth.uptimeSec)} · scan active: ${sysHealth.scanActive ? "yes" : "no"}`);
+      lines.push(`- browsers alive: ${sysHealth.browsers.liveChildren} · janitor: ${sysHealth.janitor.sweeps} sweeps, ${sysHealth.janitor.reapedTotal} reaped`);
+      lines.push(`- memory: RSS ${sysHealth.memory.rssMb} MB / heap ${sysHealth.memory.heapUsedMb} MB`);
+    }
     const text = lines.join("\n");
     // navigator.clipboard is unavailable/denied in some contexts (insecure
     // origins, permission policies) — fall back to the legacy execCommand
@@ -189,7 +242,7 @@ export function ScraperStatusPanel({
     }
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
-  }, [statuses, health]);
+  }, [statuses, health, sysHealth]);
 
   if (!Array.isArray(statuses) || statuses.length === 0) return null;
   const okCount = statuses.filter((s) => s.status === "ok").length;
@@ -341,6 +394,65 @@ export function ScraperStatusPanel({
               </div>
             </CollapsibleContent>
           </Collapsible>
+        )}
+
+        {/* ── System health strip ──────────────────────────────────
+            Live process vitals: browser children (leak watch), janitor
+            activity, memory + uptime. Answers "is the backend healthy?"
+            at a glance instead of grepping dev.log. */}
+        {sysHealth && (
+          <div className="mx-4 mb-3 flex flex-wrap items-center gap-1.5 rounded-lg border border-dashed bg-muted/30 px-3 py-2">
+            <span className="mr-1 flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground">
+              <HeartPulse className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" aria-hidden />
+              System
+            </span>
+            {/* Browser children: 1 while idle is NORMAL (OLX shared singleton
+                stays alive by design). >1 with no scan running = leak watch. */}
+            <span
+              className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold tabular-nums ${
+                sysHealth.scanActive || sysHealth.browsers.liveChildren <= 1
+                  ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                  : "bg-amber-500/10 text-amber-700 dark:text-amber-400"
+              }`}
+              title={
+                sysHealth.scanActive
+                  ? "A scan is running — browsers are expected right now"
+                  : "Playwright browser processes alive right now. 1 while idle is normal (OLX shared singleton); more could indicate a leak the janitor will reap."
+              }
+            >
+              <Globe className="h-3 w-3" aria-hidden />
+              {sysHealth.browsers.liveChildren} browser{sysHealth.browsers.liveChildren === 1 ? "" : "s"}
+              {sysHealth.scanActive ? " · scanning" : ""}
+            </span>
+            <span
+              className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium tabular-nums text-muted-foreground"
+              title="Browser-janitor activity since boot: total sweeps + browsers reaped (leaked chromium processes killed)"
+            >
+              janitor: {sysHealth.janitor.sweeps} sweeps · reaped {sysHealth.janitor.reapedTotal}
+            </span>
+            <span
+              className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium tabular-nums text-muted-foreground"
+              title="next-server process memory (RSS / heap used) — watch this under repeated scans"
+            >
+              <MemoryStick className="h-3 w-3" aria-hidden />
+              {sysHealth.memory.rssMb} MB / {sysHealth.memory.heapUsedMb} MB heap
+            </span>
+            <span
+              className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium tabular-nums text-muted-foreground"
+              title="Time since the server process started"
+            >
+              up {fmtUptime(sysHealth.uptimeSec)}
+            </span>
+            <button
+              type="button"
+              onClick={() => void fetchSysHealth()}
+              className="ml-auto inline-flex h-5 w-5 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              title="Refresh system health"
+              aria-label="Refresh system health"
+            >
+              <RefreshCw className={`h-3 w-3 ${sysRefreshing ? "animate-spin" : ""}`} aria-hidden />
+            </button>
+          </div>
         )}
 
         {/* Copy debug report — puts a markdown summary of this scan's

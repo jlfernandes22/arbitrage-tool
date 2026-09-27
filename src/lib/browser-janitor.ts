@@ -91,6 +91,32 @@ function reap(procs: ProcInfo[]): number {
 let lastScanActivityAt = Date.now();
 let sweepTimer: ReturnType<typeof setInterval> | null = null;
 
+// ── Janitor metrics (surfaced via /api/system/health) ──────────────────
+// Cheap counters so the debug panel can show the janitor is alive and how
+// much it has cleaned since boot — no more grepping dev.log to answer
+// "is the reaper working?".
+interface JanitorStats {
+  startedAt: number;
+  sweeps: number;
+  lastSweepAt: number | null;
+  reapedTotal: number;
+  lastReapedAt: number | null;
+  lastReapedCount: number;
+}
+const janitorStats: JanitorStats = {
+  startedAt: Date.now(),
+  sweeps: 0,
+  lastSweepAt: null,
+  reapedTotal: 0,
+  lastReapedAt: null,
+  lastReapedCount: 0,
+};
+
+/** Snapshot of janitor activity since boot (read-only copy). */
+export function getJanitorStats(): JanitorStats {
+  return { ...janitorStats };
+}
+
 /** Called by the orchestrator whenever a scan starts or finishes. */
 export function noteScanActivity(): void {
   lastScanActivityAt = Date.now();
@@ -102,11 +128,17 @@ export function noteScanActivity(): void {
  * Returns the number of browsers reaped (0 normally).
  */
 export function sweepLingeringBrowsers(): number {
+  janitorStats.sweeps++;
+  janitorStats.lastSweepAt = Date.now();
   if (hasActiveScan()) return 0;
   if (Date.now() - lastScanActivityAt < GRACE_AFTER_LAST_SCAN_MS) return 0;
   const leaks = listPlaywrightChildren();
   if (leaks.length === 0) return 0;
-  return reap(leaks);
+  const killed = reap(leaks);
+  janitorStats.reapedTotal += killed;
+  janitorStats.lastReapedAt = Date.now();
+  janitorStats.lastReapedCount = killed;
+  return killed;
 }
 
 /** Count live playwright chromium children (for scan-end audit logs). */
@@ -120,6 +152,7 @@ export function countLiveBrowserChildren(): number {
  */
 export function startBrowserJanitor(): void {
   if (sweepTimer) return;
+  janitorStats.startedAt = Date.now();
   sweepTimer = setInterval(() => {
     try {
       sweepLingeringBrowsers();

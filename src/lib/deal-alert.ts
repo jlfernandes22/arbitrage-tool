@@ -14,6 +14,16 @@ const THRESHOLD_KEY = "arbitrage_deal_alert_threshold";
 const ENABLED_KEY = "arbitrage_deal_alert_enabled";
 const MOVE_THRESHOLD_KEY = "arbitrage_profit_move_threshold";
 const MOVE_ENABLED_KEY = "arbitrage_profit_move_enabled";
+const MOVE_DIRECTION_KEY = "arbitrage_profit_move_direction";
+
+/**
+ * Which direction of tracked-listing profit moves should fire the watch:
+ * - "jumps" (default): profit IMPROVED ≥ threshold (seller cut the price) — the buy signal.
+ * - "drops": profit FELL ≥ threshold (ask rose / resale softened) — useful to
+ *   catch a tracked deal getting away so you can act before it's gone.
+ * - "all": either direction (biggest |Δ| wins, jumps preferred on ties).
+ */
+export type ProfitMoveDirection = "jumps" | "all" | "drops";
 
 export const DEAL_ALERT_THRESHOLD_MIN = 5;
 export const DEAL_ALERT_THRESHOLD_MAX = 80;
@@ -152,31 +162,146 @@ export function setProfitMoveEnabled(on: boolean): void {
   }
 }
 
+/** Read the profit-move direction preference. Persisted, default "jumps". */
+export function getProfitMoveDirection(): ProfitMoveDirection {
+  if (typeof window === "undefined") return "jumps";
+  try {
+    const raw = localStorage.getItem(MOVE_DIRECTION_KEY);
+    if (raw === "all" || raw === "drops") return raw;
+    return "jumps";
+  } catch {
+    return "jumps";
+  }
+}
+
+export function setProfitMoveDirection(dir: ProfitMoveDirection): void {
+  try {
+    localStorage.setItem(MOVE_DIRECTION_KEY, dir);
+  } catch {
+    // ignore
+  }
+}
+
 /**
  * Decide whether a finished scan qualifies for a profit-move alert.
- * Returns the biggest qualifying jump for messaging, else null.
+ * Returns the biggest qualifying move for messaging, else null.
  *
  * Candidates come from the listing-trend API (Δ estimated net profit per
- * Goofish listing vs its most recent prior sighting). Only POSITIVE jumps
- * count — a listing getting WORSE is information, not a buy signal, and it
- * stays visible in the table's Trend column instead of interrupting anyone.
+ * Goofish listing vs its most recent prior sighting).
+ *
+ * Direction-aware (see ProfitMoveDirection):
+ * - "jumps" (default): only POSITIVE deltas fire — a listing getting worse
+ *   stays visible in the table's Trend column instead of interrupting anyone.
+ * - "drops": only NEGATIVE deltas fire — a tracked deal decaying is the
+ *   "act now or lose it" warning.
+ * - "all": either direction; the biggest |Δ| wins, positive preferred on ties.
+ *
+ * The returned `moved` count reflects how many listings passed the
+ * direction+threshold filter (for the "+N more" message), and `direction`
+ * tells the UI which color/sound treatment fits the best move.
  */
 export function evaluateProfitMoveAlert(opts: {
   candidates: Array<{ id: string; title: string; deltaProfitEur: number; profitEur: number }>;
   thresholdEur: number;
   enabled: boolean;
-}): { id: string; title: string; deltaProfitEur: number; profitEur: number; jumped: number } | null {
+  direction?: ProfitMoveDirection;
+}): {
+  id: string;
+  title: string;
+  deltaProfitEur: number;
+  profitEur: number;
+  moved: number;
+  direction: "up" | "down";
+} | null {
   if (!opts.enabled) return null;
   if (!Array.isArray(opts.candidates) || opts.candidates.length === 0) return null;
   if (!Number.isFinite(opts.thresholdEur) || opts.thresholdEur <= 0) return null;
-  let best: { id: string; title: string; deltaProfitEur: number; profitEur: number } | null = null;
-  let jumped = 0;
+  const dir = opts.direction ?? "jumps";
+  let best: { id: string; title: string; deltaProfitEur: number; profitEur: number; direction: "up" | "down" } | null =
+    null;
+  let moved = 0;
   for (const c of opts.candidates) {
-    if (!Number.isFinite(c.deltaProfitEur) || c.deltaProfitEur <= 0) continue;
-    if (c.deltaProfitEur < opts.thresholdEur) continue;
-    jumped++;
-    if (!best || c.deltaProfitEur > best.deltaProfitEur) best = c;
+    if (!Number.isFinite(c.deltaProfitEur) || c.deltaProfitEur === 0) continue;
+    const up = c.deltaProfitEur > 0;
+    if (dir === "jumps" && !up) continue;
+    if (dir === "drops" && up) continue;
+    if (Math.abs(c.deltaProfitEur) < opts.thresholdEur) continue;
+    moved++;
+    if (!best) {
+      best = { ...c, direction: up ? "up" : "down" };
+      continue;
+    }
+    // Ranking: bigger |Δ| wins; on an exact tie a positive move beats a
+    // negative one (a buy signal outranks a warning at equal magnitude).
+    const a = Math.abs(c.deltaProfitEur);
+    const b = Math.abs(best.deltaProfitEur);
+    if (a > b || (a === b && up && best.direction === "down")) {
+      best = { ...c, direction: up ? "up" : "down" };
+    }
   }
   if (!best) return null;
-  return { ...best, jumped };
+  return { ...best, moved };
+}
+
+// ── Market-moved digest ─────────────────────────────────────────────────
+// One consolidated summary of everything that CHANGED since previous scans:
+// tracked-listing profit moves (up/down) + EU comp price moves (up/down).
+// Fired as a single toast after a scan completes (in addition to — never
+// instead of — the deal/profit-move alerts themselves).
+
+export interface MarketDigest {
+  profitUp: number;
+  profitDown: number;
+  biggestProfitUp: number;
+  biggestProfitDown: number;
+  compUp: number;
+  compDown: number;
+  biggestCompUp: number;
+  biggestCompDown: number;
+  /** True when anything moved at all (otherwise the toast is skipped). */
+  hasMovement: boolean;
+}
+
+export function buildMarketDigest(opts: {
+  profitDeltas: number[];
+  compDeltas: number[];
+}): MarketDigest {
+  const profitUp = opts.profitDeltas.filter((d) => d > 0);
+  const profitDown = opts.profitDeltas.filter((d) => d < 0);
+  const compUp = opts.compDeltas.filter((d) => d > 0);
+  const compDown = opts.compDeltas.filter((d) => d < 0);
+  const digest: MarketDigest = {
+    profitUp: profitUp.length,
+    profitDown: profitDown.length,
+    biggestProfitUp: profitUp.length ? Math.max(...profitUp) : 0,
+    biggestProfitDown: profitDown.length ? Math.min(...profitDown) : 0,
+    compUp: compUp.length,
+    compDown: compDown.length,
+    biggestCompUp: compUp.length ? Math.max(...compUp) : 0,
+    biggestCompDown: compDown.length ? Math.min(...compDown) : 0,
+    hasMovement:
+      profitUp.length + profitDown.length + compUp.length + compDown.length > 0,
+  };
+  return digest;
+}
+
+/**
+ * Render the digest as the toast description — compact two-line summary:
+ * "source: 2 better (biggest +€30) · 1 worse" / "EU comps: 3 cheaper (−€12) · 1 up".
+ */
+export function formatMarketDigest(d: MarketDigest): string[] {
+  const lines: string[] = [];
+  const profitParts: string[] = [];
+  if (d.profitUp > 0)
+    profitParts.push(`${d.profitUp} better (biggest +€${Math.round(d.biggestProfitUp)})`);
+  if (d.profitDown > 0)
+    profitParts.push(`${d.profitDown} worse (−€${Math.round(Math.abs(d.biggestProfitDown))})`);
+  if (profitParts.length) lines.push(`Source listings: ${profitParts.join(" · ")}`);
+  const compParts: string[] = [];
+  if (d.compUp > 0)
+    compParts.push(`${d.compUp} up (biggest +€${Math.round(d.biggestCompUp)})`);
+  if (d.compDown > 0)
+    compParts.push(`${d.compDown} cheaper (−€${Math.round(Math.abs(d.biggestCompDown))})`);
+  if (compParts.length) lines.push(`EU comps: ${compParts.join(" · ")}`);
+  return lines;
 }

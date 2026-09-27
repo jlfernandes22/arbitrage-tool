@@ -67,6 +67,7 @@ import {
   notifyScanFailed,
   notifyDealFound,
   notifyProfitMove,
+  notifyMarketMoved,
 } from "@/lib/notify";
 import {
   getSoundPreference,
@@ -76,12 +77,16 @@ import {
   playTestBlip,
   playDealAlertSound,
   playProfitMoveSound,
+  playProfitDropSound,
 } from "@/lib/sound";
 import {
+  buildMarketDigest,
   evaluateDealAlert,
   evaluateProfitMoveAlert,
+  formatMarketDigest,
   getDealAlertEnabled,
   getDealAlertThreshold,
+  getProfitMoveDirection,
   getProfitMoveEnabled,
   getProfitMoveThreshold,
 } from "@/lib/deal-alert";
@@ -295,61 +300,136 @@ export default function Home() {
                   // time — immune to stale closure state in this poll loop.
                   playScanCompleteSound();
                 }
-                // ── Profit-move watch (complements the deal alert) ──
-                // Did any listing seen in a PREVIOUS scan of this query now
-                // net ≥ threshold more? (seller price cut or EU resale rise.)
-                // Fire-and-forget + best-effort: a trend hiccup must never
-                // break the completion flow. Preferences read at use time.
-                try {
-                  const lres = await fetch(`/api/tasks/listing-trend/${id}`, {
-                    cache: "no-store",
-                  });
-                  if (lres.ok) {
-                    const lt = (await lres.json()) as {
-                      deltas?: Record<string, { deltaProfitEur?: number }>;
-                    };
-                    const deltas = lt?.deltas ?? {};
+                // ── Trend watches (fire-and-forget, never block completion) ──
+                // BOTH trend endpoints in parallel: listing-trend gives the
+                // per-Goofish-listing profit deltas and comp-trend the EU
+                // comp price deltas. Together they feed (a) the direction-
+                // aware profit-move alert and (b) the consolidated "market
+                // moved" digest toast. Best-effort: any failure here must
+                // never break the completion flow. Preferences read at use
+                // time so poll-loop closures can't go stale.
+                void (async () => {
+                  try {
+                    const [lres, cres] = await Promise.allSettled([
+                      fetch(`/api/tasks/listing-trend/${id}`, { cache: "no-store" }),
+                      fetch(`/api/tasks/comp-trend/${id}`, { cache: "no-store" }),
+                    ]);
+                    // ── Parse listing profit deltas ──
+                    const profitDeltas: number[] = [];
                     const titleById = new Map<string, string>();
                     const profitById = new Map<string, number>();
-                    for (const l of Array.isArray(rdata.listings) ? rdata.listings : []) {
-                      if (l?.listing?.id) {
-                        titleById.set(l.listing.id, l.listing.title);
-                        profitById.set(l.listing.id, l.profit?.netProfitEur ?? 0);
+                    const candidates: Array<{
+                      id: string;
+                      title: string;
+                      deltaProfitEur: number;
+                      profitEur: number;
+                    }> = [];
+                    if (lres.status === "fulfilled" && lres.value.ok) {
+                      const lt = (await lres.value.json()) as {
+                        deltas?: Record<string, { deltaProfitEur?: number }>;
+                      };
+                      const deltas = lt?.deltas ?? {};
+                      for (const l of Array.isArray(rdata.listings) ? rdata.listings : []) {
+                        if (l?.listing?.id) {
+                          titleById.set(l.listing.id, l.listing.title);
+                          profitById.set(l.listing.id, l.profit?.netProfitEur ?? 0);
+                        }
+                      }
+                      for (const [lid, d] of Object.entries(deltas)) {
+                        const delta = Number(d?.deltaProfitEur ?? 0);
+                        if (!Number.isFinite(delta) || delta === 0) continue;
+                        profitDeltas.push(delta);
+                        candidates.push({
+                          id: lid,
+                          title: titleById.get(lid) ?? lid,
+                          deltaProfitEur: delta,
+                          profitEur: profitById.get(lid) ?? 0,
+                        });
                       }
                     }
-                    const candidates = Object.entries(deltas).map(([lid, d]) => ({
-                      id: lid,
-                      title: titleById.get(lid) ?? lid,
-                      deltaProfitEur: Number(d?.deltaProfitEur ?? 0),
-                      profitEur: profitById.get(lid) ?? 0,
-                    }));
+                    // ── Parse EU comp price deltas ──
+                    const compDeltas: number[] = [];
+                    if (cres.status === "fulfilled" && cres.value.ok) {
+                      const ct = (await cres.value.json()) as {
+                        deltas?: Record<string, { deltaEur?: number }>;
+                      };
+                      for (const d of Object.values(ct?.deltas ?? {})) {
+                        const delta = Number(d?.deltaEur ?? 0);
+                        if (!Number.isFinite(delta) || delta === 0) continue;
+                        compDeltas.push(delta);
+                      }
+                    }
+
+                    // ── Direction-aware profit-move alert (unchanged primacy) ──
                     const move = evaluateProfitMoveAlert({
                       candidates,
                       thresholdEur: getProfitMoveThreshold(),
                       enabled: getProfitMoveEnabled(),
+                      direction: getProfitMoveDirection(),
                     });
+
+                    // ── Consolidated "market moved" digest ──
+                    // One toast covering EVERYTHING that changed: tracked
+                    // listing profit moves + EU comp price moves. Replaces
+                    // the old separate profit-move toast (the alert-level
+                    // signal rides inside it); comp moves that never had a
+                    // home in any alert finally get surfaced too.
+                    const digest = buildMarketDigest({ profitDeltas, compDeltas });
                     if (move) {
-                      playProfitMoveSound();
+                      const down = move.direction === "down";
+                      if (down) {
+                        playProfitDropSound();
+                      } else {
+                        playProfitMoveSound();
+                      }
                       notifyProfitMove({
                         query: pollQueryRef.current,
                         title: move.title,
                         deltaProfitEur: move.deltaProfitEur,
                         profitEur: move.profitEur,
-                        jumped: move.jumped,
+                        jumped: move.moved,
+                        direction: move.direction,
                       });
-                      toast.success(
-                        `📈 Profit jump — +€${Math.round(move.deltaProfitEur)} on "${move.title.slice(0, 40)}" → €${Math.round(move.profitEur)} net now${move.jumped > 1 ? ` (+${move.jumped - 1} more improved)` : ""}`,
-                        {
+                      const digestLines = formatMarketDigest(digest);
+                      const digestTail =
+                        digestLines.length > 1 ? `\n${digestLines[1]}` : "";
+                      const title = down
+                        ? `📉 Profit drop — −€${Math.round(Math.abs(move.deltaProfitEur))} on "${move.title.slice(0, 36)}" → €${Math.round(move.profitEur)} net now${move.moved > 1 ? ` (+${move.moved - 1} more moved)` : ""}`
+                        : `📈 Profit jump — +€${Math.round(move.deltaProfitEur)} on "${move.title.slice(0, 36)}" → €${Math.round(move.profitEur)} net now${move.moved > 1 ? ` (+${move.moved - 1} more moved)` : ""}`;
+                      if (down) {
+                        toast.warning(title, {
                           description:
-                            "A listing you've seen before just became a better deal — check the Trend column in the results table.",
+                            "A listing you've tracked just got WORSE — the deal is decaying. " +
+                            "Check the Trend column before it's gone." +
+                            (digestTail ? `\n${digestTail}` : ""),
                           duration: 12000,
-                        },
-                      );
+                        });
+                      } else {
+                        toast.success(title, {
+                          description:
+                            "A listing you've seen before just became a better deal — check the Trend column in the results table." +
+                            (digestTail ? `\n${digestTail}` : ""),
+                          duration: 12000,
+                        });
+                      }
+                    } else if (digest.hasMovement) {
+                      // Nothing hit alert thresholds — but the market still
+                      // moved. Quiet info digest (no sound, no OS interrupt
+                      // for this one EXCEPT a soft desktop ping when hidden).
+                      const lines = formatMarketDigest(digest);
+                      notifyMarketMoved({
+                        query: pollQueryRef.current,
+                        summary: lines.join(" · "),
+                      });
+                      toast.info("📊 Market moved since your last scan", {
+                        description: lines.join("\n"),
+                        duration: 9000,
+                      });
                     }
+                  } catch {
+                    // best-effort — trend/eval failures never block completion
                   }
-                } catch {
-                  // best-effort — trend/eval failures never block completion
-                }
+                })();
               } else {
                 // Result reload failed (e.g. task evicted after a restart) —
                 // surface it instead of silently leaving a blank screen.
@@ -1123,6 +1203,17 @@ export default function Home() {
           {/* Decorative glow */}
           <div className="pointer-events-none absolute -right-16 -top-16 h-48 w-48 rounded-full bg-emerald-500/10 blur-3xl" aria-hidden />
           <div className="pointer-events-none absolute -bottom-20 -left-10 h-40 w-40 rounded-full bg-amber-500/10 blur-3xl" aria-hidden />
+          {/* Dot-grid texture — near-invisible depth layer that reads as
+              "engineering paper"; static (no repaint cost). */}
+          <div
+            className="pointer-events-none absolute inset-0 opacity-40"
+            aria-hidden
+            style={{
+              backgroundImage:
+                "radial-gradient(oklch(0.556 0 0 / 0.09) 1px, transparent 1px)",
+              backgroundSize: "18px 18px",
+            }}
+          />
           <div className="relative flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
             {/* Icon badge */}
             <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-500 to-teal-600 text-white shadow-lg shadow-emerald-500/20 sm:h-11 sm:w-11">

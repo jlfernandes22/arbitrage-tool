@@ -149,3 +149,23 @@ export function playProfitMoveSound(): void {
     // audio unavailable — alerts are best-effort
   }
 }
+
+/**
+ * Three-note descending warning — a TRACKED listing's profit FELL past the
+ * threshold (the "act now or lose it" direction of the profit-move watch).
+ * Longer fall (E5→C5→A4) than the 2-note jump chime so the two directions
+ * are distinguishable by ear alone.
+ */
+export function playProfitDropSound(): void {
+  if (getSoundPreference() !== "on") return;
+  try {
+    const ctx = getCtx();
+    if (!ctx) return;
+    const t0 = ctx.currentTime + 0.01;
+    tone(ctx, 659.25, t0, 0.13, "sine", 0.07); // E5
+    tone(ctx, 523.25, t0 + 0.12, 0.13, "sine", 0.07); // C5
+    tone(ctx, 440.0, t0 + 0.24, 0.32, "sine", 0.08); // A4
+  } catch {
+    // audio unavailable — alerts are best-effort
+  }
+}

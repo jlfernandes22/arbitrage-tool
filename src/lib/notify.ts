@@ -141,11 +141,36 @@ export function notifyDealFound(opts: {
 }
 
 /**
+ * Market-moved digest — the consolidated "the market changed since your last
+ * scan" ping. Fires when tracked listings / EU comps moved but nothing hit
+ * the dedicated deal or profit-move thresholds: quieter treatment (own tag,
+ * still visible-time so the digest isn't lost when the user is elsewhere).
+ */
+export function notifyMarketMoved(opts: { query: string; summary: string }): void {
+  if (!notificationsSupported()) return;
+  if (Notification.permission !== "granted") return;
+  try {
+    const n = new Notification(`📊 Market moved: ${opts.query}`, {
+      body: opts.summary.slice(0, 160),
+      tag: "arbitrage-market-digest",
+    });
+    n.onclick = () => {
+      window.focus();
+      n.close();
+    };
+  } catch {
+    // ignore — best-effort
+  }
+}
+
+/**
  * Profit-move alert — a tracked Goofish listing's estimated profit jumped
  * past the user's € threshold since the previous scan (seller cut the price
  * or EU resale rose). Like a deal, this is worth interrupting for: it fires
  * EVEN when the tab is visible, under its own tag so it never displaces the
  * deal alert or the routine completion ping.
+ * `direction: "down"` flips the treatment to a warning (a tracked deal
+ * decaying — act now or lose it).
  */
 export function notifyProfitMove(opts: {
   query: string;
@@ -153,13 +178,20 @@ export function notifyProfitMove(opts: {
   deltaProfitEur: number;
   profitEur: number;
   jumped: number;
+  direction?: "up" | "down";
 }): void {
   if (!notificationsSupported()) return;
   if (Notification.permission !== "granted") return;
-  const more = opts.jumped > 1 ? ` (+${opts.jumped - 1} more improved)` : "";
+  const down = opts.direction === "down";
+  const more = opts.jumped > 1 ? ` (+${opts.jumped - 1} more moved)` : "";
+  const amount = down
+    ? `−€${Math.abs(Math.round(opts.deltaProfitEur))}`
+    : `+€${Math.round(opts.deltaProfitEur)}`;
+  const emoji = down ? "📉" : "📈";
+  const verb = down ? "dropped" : "jumped";
   try {
-    const n = new Notification(`📈 Profit jump: ${opts.query}`, {
-      body: `+€${Math.round(opts.deltaProfitEur)} on "${opts.title.slice(0, 60)}" → €${Math.round(opts.profitEur)} net now${more}`,
+    const n = new Notification(`${emoji} Profit ${verb}: ${opts.query}`, {
+      body: `${amount} on "${opts.title.slice(0, 60)}" → €${Math.round(opts.profitEur)} net now${more}`,
       tag: "arbitrage-profit-move",
     });
     n.onclick = () => {

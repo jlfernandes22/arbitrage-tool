@@ -68,8 +68,10 @@ const listingTrendCache = new Map<string, ListingTrendResponse>();
 /**
  * Tiny inline sparkline of a listing's estimated profit across scans.
  * Color encodes direction (emerald = last ≥ first, rose = declining);
- * a dot marks the newest point. 2+ points required — a single point has
- * no direction.
+ * a soft gradient area under the line emphasizes the trend shape, and a
+ * dot marks the newest point. 2+ points required — a single point has no
+ * direction. Gradients need unique IDs per instance+direction — derived
+ * from the data so no counter state is needed.
  */
 function ProfitSparkline({
   points,
@@ -94,6 +96,12 @@ function ProfitSparkline({
   const up = points[points.length - 1] >= points[0];
   const stroke = up ? "#10b981" : "#f43f5e"; // emerald-500 / rose-500 — legible in both themes
   const last = coords[coords.length - 1];
+  // Unique gradient id: direction + a coarse fingerprint of the series.
+  const gid = `sp-${up ? "u" : "d"}-${Math.round(points[0] * 100)}-${Math.round(points[points.length - 1] * 100)}-${points.length}`;
+  const areaPath =
+    `M ${coords[0][0].toFixed(1)} ${height} ` +
+    coords.map(([x, y]) => `L ${x.toFixed(1)} ${y.toFixed(1)}`).join(" ") +
+    ` L ${last[0].toFixed(1)} ${height} Z`;
   return (
     <svg
       width={width}
@@ -102,6 +110,13 @@ function ProfitSparkline({
       className="shrink-0"
       aria-hidden="true"
     >
+      <defs>
+        <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={stroke} stopOpacity="0.28" />
+          <stop offset="100%" stopColor={stroke} stopOpacity="0.02" />
+        </linearGradient>
+      </defs>
+      <path d={areaPath} fill={`url(#${gid})`} />
       <polyline
         points={coords.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(" ")}
         fill="none"
@@ -562,13 +577,19 @@ export const ResultsTable = forwardRef<ResultsTableHandle, ResultsTableProps>(fu
                 return (
                   <TableRow
                     key={listing.id}
-                    className={`cursor-pointer transition-colors hover:bg-muted/50 ${
+                    className={`row-enter cursor-pointer transition-colors hover:bg-muted/50 ${
                       // Zebra striping — alternating rows make wide tabular
                       // data (7+ columns) much easier to scan across.
                       (pageStart + idx) % 2 === 1 ? "bg-muted/20" : ""
                     } ${
                       l?.hidden ? "opacity-50" : ""
                     } ${isActive ? "bg-primary/5 ring-1 ring-inset ring-primary/30" : ""}`}
+                    style={{
+                      // Stagger the entrance per row on page change — capped
+                      // so page 2+ never feels sluggish (keyframes in
+                      // globals.css; disabled for prefers-reduced-motion).
+                      animationDelay: `${Math.min(idx * 22, 300)}ms`,
+                    }}
                     onClick={() => setSelected(l)}
                   >
                     <TableCell className="max-w-[300px]">

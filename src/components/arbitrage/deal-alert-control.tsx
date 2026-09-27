@@ -30,7 +30,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { Bell, Target, TrendingUp, Volume2 } from "lucide-react";
+import { Bell, ArrowDownUp, Target, TrendingDown, TrendingUp, Volume2 } from "lucide-react";
 import { toast } from "sonner";
 import {
   DEAL_ALERT_THRESHOLD_DEFAULT,
@@ -43,12 +43,15 @@ import {
   setDealAlertEnabled,
   getDealAlertThreshold,
   setDealAlertThreshold,
+  getProfitMoveDirection,
+  setProfitMoveDirection,
   getProfitMoveEnabled,
   setProfitMoveEnabled,
   getProfitMoveThreshold,
   setProfitMoveThreshold,
+  type ProfitMoveDirection,
 } from "@/lib/deal-alert";
-import { playProfitMoveSound, playTestBlip } from "@/lib/sound";
+import { playProfitDropSound, playProfitMoveSound, playTestBlip } from "@/lib/sound";
 
 // Subscribe to cross-tab storage events so the control stays in sync if the
 // user changes thresholds in another tab/window.
@@ -84,6 +87,11 @@ export function DealAlertControl() {
     subscribeToStorage,
     getProfitMoveEnabled,
     () => true,
+  );
+  const moveDirection = useSyncExternalStore(
+    subscribeToStorage,
+    getProfitMoveDirection,
+    () => "jumps" as ProfitMoveDirection,
   );
   void version; // consumed implicitly via re-render on write()
 
@@ -127,6 +135,24 @@ export function DealAlertControl() {
     (eur: number) => {
       setProfitMoveThreshold(eur);
       write();
+    },
+    [write],
+  );
+
+  const persistMoveDirection = useCallback(
+    (dir: ProfitMoveDirection) => {
+      setProfitMoveDirection(dir);
+      write();
+      if (dir === "drops") {
+        playProfitDropSound();
+        toast.info("Watching for profit DROPS — a tracked deal decaying fires a warning");
+      } else if (dir === "all") {
+        playTestBlip();
+        toast.success("Watching ALL profit moves — jumps and drops past your threshold");
+      } else {
+        playProfitMoveSound();
+        toast.success("Watching profit JUMPS — the classic buy signal");
+      }
     },
     [write],
   );
@@ -228,12 +254,49 @@ export function DealAlertControl() {
           </div>
 
           <div className={moveEnabled ? "space-y-3" : "space-y-3 opacity-50 pointer-events-none"}>
+            {/* Direction: which half of the movement distribution fires. */}
+            <div className="flex items-center justify-between gap-2">
+              <Label className="text-xs font-medium">Direction</Label>
+              <div
+                role="radiogroup"
+                aria-label="Profit move direction"
+                className="flex rounded-md border p-0.5"
+              >
+                {(
+                  [
+                    { key: "jumps", label: "Jumps", icon: TrendingUp },
+                    { key: "all", label: "All", icon: ArrowDownUp },
+                    { key: "drops", label: "Drops", icon: TrendingDown },
+                  ] as Array<{ key: ProfitMoveDirection; label: string; icon: typeof TrendingUp }>
+                ).map(({ key, label, icon: Icon }) => (
+                  <button
+                    key={key}
+                    type="button"
+                    role="radio"
+                    aria-checked={moveDirection === key}
+                    onClick={() => persistMoveDirection(key)}
+                    className={`flex items-center gap-1 rounded-[5px] px-2 py-1 text-[10px] font-semibold transition-colors ${
+                      moveDirection === key
+                        ? key === "drops"
+                          ? "bg-rose-500/15 text-rose-600 dark:text-rose-400"
+                          : key === "all"
+                            ? "bg-amber-500/15 text-amber-700 dark:text-amber-400"
+                            : "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    <Icon className="h-3 w-3" aria-hidden />
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
             <div className="flex items-center justify-between">
               <Label htmlFor="move-threshold" className="text-xs font-medium">
-                Profit jump
+                {moveDirection === "drops" ? "Profit fall" : "Profit jump"}
               </Label>
               <span className="rounded-md bg-emerald-500/10 px-2 py-0.5 text-xs font-bold tabular-nums text-emerald-700 dark:text-emerald-400">
-                + €{moveThreshold.toFixed(0)}
+                {moveDirection === "drops" ? "−" : "+"} €{moveThreshold.toFixed(0)}
               </span>
             </div>
             <Slider
@@ -254,9 +317,10 @@ export function DealAlertControl() {
 
           <Separator />
 
-          <div className="flex items-center justify-between gap-2">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
             <p className="text-[11px] leading-snug text-muted-foreground">
-              Each fires a toast + desktop ping + its own chime.
+              Each fires a toast + desktop ping + its own chime. A combined
+              &quot;market moved&quot; summary rides along when anything else changed.
             </p>
             <div className="flex shrink-0 items-center gap-1.5">
               <Button
@@ -290,6 +354,22 @@ export function DealAlertControl() {
               >
                 <TrendingUp className="h-3 w-3" />
                 Jump
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 gap-1 text-xs"
+                onClick={() => {
+                  playProfitDropSound();
+                  toast.warning("📉 Profit drop preview — −€18 on a tracked listing", {
+                    description: "The ask rose since your last scan — the deal is decaying.",
+                    duration: 5000,
+                  });
+                }}
+                title="Preview profit-drop warning"
+              >
+                <TrendingDown className="h-3 w-3" />
+                Drop
               </Button>
             </div>
           </div>
