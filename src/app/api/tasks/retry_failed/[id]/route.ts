@@ -17,7 +17,8 @@ import {
   type TaskState,
 } from "@/lib/engine";
 import { getReferencePrices } from "@/lib/reference-prices";
-import { buildSummary } from "@/lib/orchestrator";
+import { buildSummary, withScrapeWatchdog, isScrapeTimeout } from "@/lib/orchestrator";
+import { noteScanActivity } from "@/lib/browser-janitor";
 import { sanitizeConfigOverrides } from "@/lib/overrides";
 import { scrapeOlx } from "@/lib/scrapers/olx";
 import { scrapeVinted } from "@/lib/scrapers/vinted";
@@ -26,6 +27,12 @@ import { scrapeAmazon } from "@/lib/scrapers/amazon";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
+
+// ── One retry at a time (module-level guard) ────────────────────────────────
+// A retry launches up to 4 fresh browsers; letting two retries overlap (or a
+// retry overlap a full scan's tail) compounds memory pressure into OOM. The
+// UI also disables the button, but the API is the real boundary.
+const activeRetries = new Set<string>();
 
 /**
  * Retry ONLY the failed EU scrapers of a completed scan.
@@ -117,6 +124,36 @@ export async function POST(
   }
   appendLog(id, "INFO", `[Retry] Re-scraping ONLY failed sites: ${sitesToRetry.join(", ")} — Goofish untouched`);
 
+  // ── Concurrency guard: one retry per task, ever, across tabs ──────────
+  if (activeRetries.has(id)) {
+    return NextResponse.json(
+      { error: "a retry is already running for this scan" },
+      { status: 409 },
+    );
+  }
+  activeRetries.add(id);
+
+  // Janitor coordination: a retry's browsers are legitimate work, not leaks —
+  // note activity so the idle reaper doesn't SIGKILL them mid-scrape.
+  noteScanActivity();
+
+  // Everything from here to the end is guarded so the retry slot is ALWAYS
+  // released and the janitor is re-notified, even on early return or throw.
+  // Narrowed captures: TS can't carry the earlier null-checks into the
+  // closure below, so bind the checked values to fresh consts and re-shadow
+  // them at the top of finishRetry().
+  const narrowedResult = storedResult;
+  const narrowedTask = task;
+  try {
+    return await finishRetry();
+  } finally {
+    activeRetries.delete(id);
+    noteScanActivity();
+  }
+
+  async function finishRetry(): Promise<NextResponse> {
+    const storedResult = narrowedResult;
+    const task = narrowedTask;
   // ── Re-scrape the failed sites in parallel ──────────────────────────
   const query = storedResult.query || task.query;
   const maxPages = cfg.scraping.max_pages > 0 ? cfg.scraping.max_pages : 1;
@@ -135,8 +172,28 @@ export async function POST(
     }>,
   ) => {
     const t0 = Date.now();
+    // Watchdog: same rationale as the orchestrator's full-scan budgets — a
+    // hung Playwright renderer must not freeze the retry request forever.
+    // EU budget 540s mirrors the main pipeline; force-close hooks are wired
+    // per-site so a timeout also cleans the browser (no leaks).
+    const r = await withScrapeWatchdog(fn(), 540_000, `[Retry] ${label}`).then(
+      (v) => {
+        if (isScrapeTimeout(v)) return null;
+        return v;
+      },
+      () => null,
+    );
+    if (r === null) {
+      newStatuses.set(site, {
+        site: site as ScraperStatus["site"],
+        label, status: "error", count: 0,
+        detail: "Retry watchdog: exceeded its 540s time budget (possible hung browser session under memory pressure).",
+        durationMs: Date.now() - t0,
+      });
+      appendLog(id, "WARN", `[Retry] ${label}: TIMEOUT — exceeded budget, reported as failed`);
+      return;
+    }
     try {
-      const r = await fn();
       newComps.push(...r.comps);
       const status: ScraperStatus["status"] = r.comps.length > 0
         ? "ok"
@@ -294,5 +351,6 @@ export async function POST(
     const message = err instanceof Error ? err.message : String(err);
     appendLog(id, "ERROR", `[Retry] Failed: ${message}`);
     return NextResponse.json({ error: message }, { status: 500 });
+  }
   }
 }

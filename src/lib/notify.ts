@@ -139,3 +139,34 @@ export function notifyDealFound(opts: {
     // ignore — best-effort
   }
 }
+
+/**
+ * Profit-move alert — a tracked Goofish listing's estimated profit jumped
+ * past the user's € threshold since the previous scan (seller cut the price
+ * or EU resale rose). Like a deal, this is worth interrupting for: it fires
+ * EVEN when the tab is visible, under its own tag so it never displaces the
+ * deal alert or the routine completion ping.
+ */
+export function notifyProfitMove(opts: {
+  query: string;
+  title: string;
+  deltaProfitEur: number;
+  profitEur: number;
+  jumped: number;
+}): void {
+  if (!notificationsSupported()) return;
+  if (Notification.permission !== "granted") return;
+  const more = opts.jumped > 1 ? ` (+${opts.jumped - 1} more improved)` : "";
+  try {
+    const n = new Notification(`📈 Profit jump: ${opts.query}`, {
+      body: `+€${Math.round(opts.deltaProfitEur)} on "${opts.title.slice(0, 60)}" → €${Math.round(opts.profitEur)} net now${more}`,
+      tag: "arbitrage-profit-move",
+    });
+    n.onclick = () => {
+      window.focus();
+      n.close();
+    };
+  } catch {
+    // ignore — best-effort
+  }
+}

@@ -177,11 +177,14 @@ const pipelineGen = new Map<string, number>();
  * timeout sentinel so the pipeline can finish and report the site honestly
  * (the hung scraper's result, if it ever lands, is discarded).
  */
-const SCRAPE_TIMEOUT = Symbol("scrape-timeout");
-function isScrapeTimeout<T>(v: T | typeof SCRAPE_TIMEOUT): v is typeof SCRAPE_TIMEOUT {
+/** Sentinel resolved by the watchdog when a scraper blows its budget.
+ *  Exported (with isScrapeTimeout) for the retry_failed endpoint. */
+export const SCRAPE_TIMEOUT = Symbol("scrape-timeout");
+/** Exported for the retry_failed endpoint — same budget semantics there. */
+export function isScrapeTimeout<T>(v: T | typeof SCRAPE_TIMEOUT): v is typeof SCRAPE_TIMEOUT {
   return v === SCRAPE_TIMEOUT;
 }
-function withScrapeWatchdog<T>(
+export function withScrapeWatchdog<T>(
   promise: Promise<T>,
   budgetMs: number,
   siteLabel: string,
@@ -191,22 +194,36 @@ function withScrapeWatchdog<T>(
   // exit). Goofish deliberately has no hook — its core lifecycle is protected.
   onTimeout?: () => void,
 ): Promise<T | typeof SCRAPE_TIMEOUT> {
-  return Promise.race([
-    promise,
-    new Promise<typeof SCRAPE_TIMEOUT>((resolve) => {
-      setTimeout(() => {
-        console.warn(
-          `[Orchestrator] ${siteLabel} exceeded its ${Math.round(budgetMs / 1000)}s budget — reporting timeout (scraper may still be hung in the background)`,
-        );
-        try {
-          onTimeout?.();
-        } catch {
-          // cancellation is best-effort
-        }
-        resolve(SCRAPE_TIMEOUT);
-      }, budgetMs);
-    }),
-  ]);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<typeof SCRAPE_TIMEOUT>((resolve) => {
+    timer = setTimeout(() => {
+      timer = undefined;
+      console.warn(
+        `[Orchestrator] ${siteLabel} exceeded its ${Math.round(budgetMs / 1000)}s budget — reporting timeout (scraper may still be hung in the background)`,
+      );
+      try {
+        onTimeout?.();
+      } catch {
+        // cancellation is best-effort
+      }
+      resolve(SCRAPE_TIMEOUT);
+    }, budgetMs);
+  });
+  // DISARM: when the scraper settles (success OR internal error) before the
+  // budget, clear the pending timer. Without this, the timer kept ticking and
+  // fired 9–11 min AFTER a successful scan — logging a false "exceeded its
+  // budget" warning and, worse, invoking onTimeout() → forceClose*Browser()
+  // against whatever browsers were alive at that moment (potentially a
+  // DIFFERENT scan's live session, which would make that scan's scrapers
+  // fail mysteriously).
+  const disarm = () => {
+    if (timer !== undefined) {
+      clearTimeout(timer);
+      timer = undefined;
+    }
+  };
+  void promise.then(disarm, disarm);
+  return Promise.race([promise, timeoutPromise]);
 }
 
 /**

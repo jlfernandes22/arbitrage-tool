@@ -1,5 +1,5 @@
 "use client";
-import { forwardRef, useImperativeHandle, useMemo, useState } from "react";
+import { forwardRef, useImperativeHandle, useEffect, useMemo, useState } from "react";
 import {
   Table,
   TableBody,
@@ -34,7 +34,10 @@ import {
   ExternalLink,
   ImageIcon,
   FileText,
+  TrendingDown,
+  TrendingUp,
 } from "lucide-react";
+import type { ListingTrendResponse } from "@/lib/listing-trend";
 import {
   type EvaluatedListing,
   CONDITION_LABELS,
@@ -52,8 +55,65 @@ type SortKey =
   | "costBaseEur"
   | "euBaseline"
   | "netProfit"
+  | "trend"
   | "margin"
   | "risk";
+
+// ── Listing profit-trend cache ──────────────────────────────────────────────
+// One fetch per scan per session (mirrors the comp-trend cache in the
+// listing-detail dialog). LRU-capped so a long session can't grow unbounded.
+const LISTING_TREND_CACHE_MAX = 30;
+const listingTrendCache = new Map<string, ListingTrendResponse>();
+
+/**
+ * Tiny inline sparkline of a listing's estimated profit across scans.
+ * Color encodes direction (emerald = last ≥ first, rose = declining);
+ * a dot marks the newest point. 2+ points required — a single point has
+ * no direction.
+ */
+function ProfitSparkline({
+  points,
+  width = 54,
+  height = 18,
+}: {
+  points: number[];
+  width?: number;
+  height?: number;
+}) {
+  if (!Array.isArray(points) || points.length < 2) return null;
+  const min = Math.min(...points);
+  const max = Math.max(...points);
+  const span = max - min || 1;
+  const pad = 2.5;
+  const step = (width - pad * 2) / (points.length - 1);
+  const coords = points.map((p, i) => {
+    const x = pad + i * step;
+    const y = height - pad - ((p - min) / span) * (height - pad * 2);
+    return [x, y] as const;
+  });
+  const up = points[points.length - 1] >= points[0];
+  const stroke = up ? "#10b981" : "#f43f5e"; // emerald-500 / rose-500 — legible in both themes
+  const last = coords[coords.length - 1];
+  return (
+    <svg
+      width={width}
+      height={height}
+      viewBox={`0 0 ${width} ${height}`}
+      className="shrink-0"
+      aria-hidden="true"
+    >
+      <polyline
+        points={coords.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(" ")}
+        fill="none"
+        stroke={stroke}
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <circle cx={last[0].toFixed(1)} cy={last[1].toFixed(1)} r="2" fill={stroke} />
+    </svg>
+  );
+}
 interface ResultsTableProps {
   listings: EvaluatedListing[];
   // Scan id — enables the comp price-watch (trend deltas vs previous scans
@@ -90,6 +150,62 @@ export const ResultsTable = forwardRef<ResultsTableHandle, ResultsTableProps>(fu
   const [selected, setSelected] = useState<EvaluatedListing | null>(null);
   const [activeIdx, setActiveIdx] = useState<number>(-1);
   const [imgErrors, setImgErrors] = useState<Record<string, boolean>>({});
+  // Profit-trend data for this scan (Δ profit per Goofish listing vs prior
+  // scans of the same query). null = no trend data (first-ever scan) → the
+  // column auto-hides.
+  //
+  // Cache-first derivation: display value is computed synchronously from the
+  // module cache / fetched state, and the effect below only performs the
+  // network fetch (setState only inside the async callback — never in the
+  // effect body, which the react-hooks lint rules rightly forbid).
+  const [fetchedTrend, setFetchedTrend] = useState<ListingTrendResponse | null>(null);
+  const [fetchedTrendTaskId, setFetchedTrendTaskId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!taskId) return;
+    if (listingTrendCache.has(taskId)) return; // cached — nothing to fetch
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/tasks/listing-trend/${taskId}`, {
+          cache: "no-store",
+        });
+        if (!res.ok) return;
+        const data = (await res.json()) as ListingTrendResponse;
+        listingTrendCache.set(taskId, data);
+        while (listingTrendCache.size > LISTING_TREND_CACHE_MAX) {
+          const oldestKey = listingTrendCache.keys().next().value;
+          if (oldestKey === undefined) break;
+          listingTrendCache.delete(oldestKey);
+        }
+        if (!cancelled) {
+          setFetchedTrend(data);
+          setFetchedTrendTaskId(taskId);
+        }
+      } catch {
+        // trend is enrichment — a failed fetch just hides the column
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [taskId]);
+  const listingTrend = taskId
+    ? listingTrendCache.get(taskId) ??
+      (fetchedTrendTaskId === taskId ? fetchedTrend : null)
+    : null;
+  const hasTrendData = !!listingTrend && Object.keys(listingTrend.series).length > 0;
+  const trendSummary = useMemo(() => {
+    if (!listingTrend) return null;
+    let up = 0;
+    let down = 0;
+    let biggest = 0;
+    for (const d of Object.values(listingTrend.deltas)) {
+      if (d.deltaProfitEur > 0) up++;
+      else if (d.deltaProfitEur < 0) down++;
+      if (Math.abs(d.deltaProfitEur) > Math.abs(biggest)) biggest = d.deltaProfitEur;
+    }
+    return { up, down, biggest };
+  }, [listingTrend]);
   // Column visibility toggle — users can hide columns they don't need.
   // "product" and "action" are always visible (essential).
   const [hiddenColumns, setHiddenColumns] = useState<Set<string>>(new Set());
@@ -147,6 +263,12 @@ export const ResultsTable = forwardRef<ResultsTableHandle, ResultsTableProps>(fu
         case "netProfit":
           cmp = a.profit.netProfitEur - b.profit.netProfitEur;
           break;
+        case "trend": {
+          const da = listingTrend?.deltas[a?.listing?.id ?? ""]?.deltaProfitEur;
+          const db = listingTrend?.deltas[b?.listing?.id ?? ""]?.deltaProfitEur;
+          cmp = (da ?? -Infinity) - (db ?? -Infinity);
+          break;
+        }
         case "margin":
           cmp = a.profit.marginPct - b.profit.marginPct;
           break;
@@ -157,7 +279,7 @@ export const ResultsTable = forwardRef<ResultsTableHandle, ResultsTableProps>(fu
       return sortDir === "asc" ? cmp : -cmp;
     });
     return arr;
-  }, [visible, sortKey, sortDir]);
+  }, [visible, sortKey, sortDir, listingTrend]);
   const toggleSort = (key: SortKey) => {
     if (sortKey === key) {
       setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -344,6 +466,24 @@ export const ResultsTable = forwardRef<ResultsTableHandle, ResultsTableProps>(fu
           )}
         </p>
         <div className="flex items-center gap-3">
+          {/* Profit-watch summary — how many tracked listings improved/declined
+              since their previous sighting, and the biggest move. */}
+          {trendSummary && (trendSummary.up > 0 || trendSummary.down > 0) && (
+            <span
+              className="hidden items-center gap-1 rounded-full border bg-muted/40 px-2 py-0.5 text-[10px] font-medium tabular-nums text-muted-foreground md:inline-flex"
+              title="Profit movement vs the previous scan of the same query (same Goofish listings)"
+            >
+              <TrendingUp className="h-3 w-3 text-emerald-500" />
+              {trendSummary.up}
+              <TrendingDown className="ml-1 h-3 w-3 text-rose-500" />
+              {trendSummary.down}
+              {trendSummary.biggest !== 0 && (
+                <span className={trendSummary.biggest > 0 ? "ml-1 font-bold text-emerald-600 dark:text-emerald-400" : "ml-1 font-bold text-rose-600 dark:text-rose-400"}>
+                  biggest {trendSummary.biggest > 0 ? "+" : "−"}€{Math.abs(trendSummary.biggest).toFixed(0)}
+                </span>
+              )}
+            </span>
+          )}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="sm" className="h-7 gap-1 text-xs" title="Toggle column visibility">
@@ -358,6 +498,7 @@ export const ResultsTable = forwardRef<ResultsTableHandle, ResultsTableProps>(fu
                 { key: "costBaseEur", label: "CNY → EUR Landed" },
                 { key: "euBaseline", label: "EU Baseline" },
                 { key: "netProfit", label: "Net Profit" },
+                { key: "trend", label: "Profit Trend" },
                 { key: "margin", label: "Margin" },
                 { key: "risk", label: "Risk" },
               ].map((col) => (
@@ -388,6 +529,7 @@ export const ResultsTable = forwardRef<ResultsTableHandle, ResultsTableProps>(fu
                 {isColVisible("costBaseEur") && <SortHead label="CNY → EUR Landed" k="costBaseEur" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} align="right" />}
                 {isColVisible("euBaseline") && <SortHead label="EU Baseline" k="euBaseline" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} align="right" />}
                 {isColVisible("netProfit") && <SortHead label="Net Profit" k="netProfit" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} align="right" />}
+                {hasTrendData && isColVisible("trend") && <SortHead label="Trend" k="trend" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} align="right" />}
                 {isColVisible("margin") && <SortHead label="Margin" k="margin" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} align="right" />}
                 {isColVisible("risk") && <SortHead label="Risk" k="risk" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} align="right" />}
                 <TableHead className="text-right text-xs">Action</TableHead>
@@ -421,6 +563,10 @@ export const ResultsTable = forwardRef<ResultsTableHandle, ResultsTableProps>(fu
                   <TableRow
                     key={listing.id}
                     className={`cursor-pointer transition-colors hover:bg-muted/50 ${
+                      // Zebra striping — alternating rows make wide tabular
+                      // data (7+ columns) much easier to scan across.
+                      (pageStart + idx) % 2 === 1 ? "bg-muted/20" : ""
+                    } ${
                       l?.hidden ? "opacity-50" : ""
                     } ${isActive ? "bg-primary/5 ring-1 ring-inset ring-primary/30" : ""}`}
                     onClick={() => setSelected(l)}
@@ -690,6 +836,67 @@ export const ResultsTable = forwardRef<ResultsTableHandle, ResultsTableProps>(fu
                       </div>
                     </TableCell>
                     )}
+                    {hasTrendData && isColVisible("trend") && (() => {
+                      const trendId = listing?.id ?? "";
+                      const seriesPt = listingTrend?.series[trendId];
+                      const delta = listingTrend?.deltas[trendId];
+                      const profitUp = (delta?.deltaProfitEur ?? 0) > 0;
+                      const priceUp = (delta?.deltaPriceCny ?? 0) > 0;
+                      return (
+                        <TableCell className="text-right">
+                          {seriesPt || delta ? (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <div className="flex cursor-help items-center justify-end gap-1.5">
+                                  {seriesPt && seriesPt.profits.length >= 2 && (
+                                    <ProfitSparkline points={seriesPt.profits} />
+                                  )}
+                                  {delta ? (
+                                    <span
+                                      className={`inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[10px] font-bold tabular-nums ${
+                                        profitUp
+                                          ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                                          : "bg-rose-500/10 text-rose-600 dark:text-rose-400"
+                                      }`}
+                                    >
+                                      {profitUp ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
+                                      {profitUp ? "+" : "−"}€{Math.abs(delta.deltaProfitEur).toFixed(0)}
+                                    </span>
+                                  ) : (
+                                    <span className="text-[10px] text-muted-foreground">flat</span>
+                                  )}
+                                </div>
+                              </TooltipTrigger>
+                              <TooltipContent side="left" className="max-w-xs p-3">
+                                <p className="text-[11px] font-semibold">
+                                  Profit across {seriesPt?.profits.length ?? 0} scan{(seriesPt?.profits.length ?? 0) === 1 ? "" : "s"}
+                                </p>
+                                {seriesPt && (
+                                  <p className="mt-0.5 text-[10px] tabular-nums text-muted-foreground">
+                                    {seriesPt.profits.map((p) => `€${p.toFixed(0)}`).join(" → ")}
+                                  </p>
+                                )}
+                                {delta && (
+                                  <p className="mt-1 text-[10px] text-muted-foreground">
+                                    Was {eurPrecise(delta.prevProfitEur)} at {new Date(delta.at).toLocaleDateString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                                  </p>
+                                )}
+                                {delta && delta.deltaPriceCny !== 0 && (
+                                  <p className="text-[10px] text-muted-foreground">
+                                    Source price {priceUp ? `rose ¥${delta.deltaPriceCny.toFixed(0)}` : `dropped ¥${Math.abs(delta.deltaPriceCny).toFixed(0)}`} since then
+                                  </p>
+                                )}
+                                <p className="mt-1 text-[10px] text-muted-foreground">
+                                  Estimated net profit movement for the SAME Goofish listing (seller price cut / EU resale shift).
+                                </p>
+                              </TooltipContent>
+                            </Tooltip>
+                          ) : (
+                            <span className="text-[10px] text-muted-foreground">—</span>
+                          )}
+                        </TableCell>
+                      );
+                    })()}
                     {isColVisible("margin") && (
                     <TableCell className="text-right">
                       <Tooltip>
@@ -699,14 +906,16 @@ export const ResultsTable = forwardRef<ResultsTableHandle, ResultsTableProps>(fu
                                 color encodes the decision zones: emerald ≥30 (strong),
                                 amber ≥15 (meets the min-margin gate), rose below.
                                 A tiny rose sliver marks negative margins so losing
-                                deals are visible at a glance while scanning rows. */}
-                            <div className="h-1.5 w-14 overflow-hidden rounded-full bg-muted">
+                                deals are visible at a glance while scanning rows.
+                                The amber TICK at 15% is the pipeline gate: any bar
+                                ending left of it was filtered out as not viable. */}
+                            <div className="relative h-1.5 w-14 overflow-hidden rounded-full bg-muted">
                               <div
                                 className={`h-full rounded-full transition-all ${
                                   marginGreen
-                                    ? "bg-emerald-500"
+                                    ? "bg-gradient-to-r from-emerald-500 to-emerald-400"
                                     : (l?.profit?.marginPct ?? 0) >= 15
-                                      ? "bg-amber-500"
+                                      ? "bg-gradient-to-r from-amber-500 to-amber-400"
                                       : (l?.profit?.marginPct ?? 0) > 0
                                         ? "bg-rose-400"
                                         : "bg-rose-500"
@@ -715,6 +924,8 @@ export const ResultsTable = forwardRef<ResultsTableHandle, ResultsTableProps>(fu
                                   width: `${Math.min(Math.max((l?.profit?.marginPct ?? 0) > 0 ? (l?.profit?.marginPct ?? 0) : 4, 4), 100)}%`,
                                 }}
                               />
+                              {/* 15% min-margin gate tick */}
+                              <div className="absolute inset-y-0 left-[15%] w-px bg-foreground/40 dark:bg-foreground/50" />
                             </div>
                             <span
                               className={`text-sm font-bold tabular-nums ${
@@ -735,7 +946,7 @@ export const ResultsTable = forwardRef<ResultsTableHandle, ResultsTableProps>(fu
                             {marginGreen ? " — strong deal" : (l?.profit?.marginPct ?? 0) >= 15 ? " — meets min-margin gate" : " — below min-margin gate"}
                           </p>
                           <p className="mt-1 text-[10px] text-muted-foreground">
-                            Net profit ÷ expected EU resale. Gates: ≥15% margin and ≥€30 net profit (configurable). Bar fills toward 100%.
+                            Net profit ÷ expected EU resale. Gates: ≥15% margin and ≥€30 net profit (configurable). Bar fills toward 100%; the tick marks the 15% gate.
                           </p>
                         </TooltipContent>
                       </Tooltip>
@@ -746,11 +957,14 @@ export const ResultsTable = forwardRef<ResultsTableHandle, ResultsTableProps>(fu
                       <Tooltip>
                         <TooltipTrigger asChild>
                           <div className="flex cursor-help items-center justify-end gap-2">
-                            <div className="h-1.5 w-12 overflow-hidden rounded-full bg-muted">
+                            <div className="relative h-1.5 w-12 overflow-hidden rounded-full bg-muted">
                               <div
                                 className={`h-full ${riskBg}`}
                                 style={{ width: `${riskScore}%` }}
                               />
+                              {/* 60 = the auto-drop boundary: a bar crossing this
+                                  tick was scam-filtered out of the viable pool. */}
+                              <div className="absolute inset-y-0 left-[60%] w-px bg-foreground/40 dark:bg-foreground/50" />
                             </div>
                             <span className={`text-xs font-bold tabular-nums ${riskTone}`}>
                               {riskScore}

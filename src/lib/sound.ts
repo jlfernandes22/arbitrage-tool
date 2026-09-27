@@ -130,3 +130,22 @@ export function playDealAlertSound(): void {
     // audio unavailable — alerts are best-effort
   }
 }
+
+/**
+ * Two-note "down-stroke" chime — a tracked listing's profit jumped since the
+ * previous scan (the buy-signal complement to the deal fanfare). Descending
+ * interval (G5→C5) so it reads differently from the ascending completion
+ * chime (E5→A5) and the ascending deal fanfare (C5-E5-G5) by ear alone.
+ */
+export function playProfitMoveSound(): void {
+  if (getSoundPreference() !== "on") return;
+  try {
+    const ctx = getCtx();
+    if (!ctx) return;
+    const t0 = ctx.currentTime + 0.01;
+    tone(ctx, 783.99, t0, 0.14, "sine", 0.08); // G5
+    tone(ctx, 523.25, t0 + 0.13, 0.3, "sine", 0.08); // C5
+  } catch {
+    // audio unavailable — alerts are best-effort
+  }
+}

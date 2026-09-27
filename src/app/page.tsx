@@ -66,6 +66,7 @@ import {
   notifyScanFinished,
   notifyScanFailed,
   notifyDealFound,
+  notifyProfitMove,
 } from "@/lib/notify";
 import {
   getSoundPreference,
@@ -74,11 +75,15 @@ import {
   playScanFailedSound,
   playTestBlip,
   playDealAlertSound,
+  playProfitMoveSound,
 } from "@/lib/sound";
 import {
   evaluateDealAlert,
+  evaluateProfitMoveAlert,
   getDealAlertEnabled,
   getDealAlertThreshold,
+  getProfitMoveEnabled,
+  getProfitMoveThreshold,
 } from "@/lib/deal-alert";
 import { DealAlertControl } from "@/components/arbitrage/deal-alert-control";
 import {
@@ -289,6 +294,61 @@ export default function Home() {
                   // Sound helper reads the preference from localStorage at play
                   // time — immune to stale closure state in this poll loop.
                   playScanCompleteSound();
+                }
+                // ── Profit-move watch (complements the deal alert) ──
+                // Did any listing seen in a PREVIOUS scan of this query now
+                // net ≥ threshold more? (seller price cut or EU resale rise.)
+                // Fire-and-forget + best-effort: a trend hiccup must never
+                // break the completion flow. Preferences read at use time.
+                try {
+                  const lres = await fetch(`/api/tasks/listing-trend/${id}`, {
+                    cache: "no-store",
+                  });
+                  if (lres.ok) {
+                    const lt = (await lres.json()) as {
+                      deltas?: Record<string, { deltaProfitEur?: number }>;
+                    };
+                    const deltas = lt?.deltas ?? {};
+                    const titleById = new Map<string, string>();
+                    const profitById = new Map<string, number>();
+                    for (const l of Array.isArray(rdata.listings) ? rdata.listings : []) {
+                      if (l?.listing?.id) {
+                        titleById.set(l.listing.id, l.listing.title);
+                        profitById.set(l.listing.id, l.profit?.netProfitEur ?? 0);
+                      }
+                    }
+                    const candidates = Object.entries(deltas).map(([lid, d]) => ({
+                      id: lid,
+                      title: titleById.get(lid) ?? lid,
+                      deltaProfitEur: Number(d?.deltaProfitEur ?? 0),
+                      profitEur: profitById.get(lid) ?? 0,
+                    }));
+                    const move = evaluateProfitMoveAlert({
+                      candidates,
+                      thresholdEur: getProfitMoveThreshold(),
+                      enabled: getProfitMoveEnabled(),
+                    });
+                    if (move) {
+                      playProfitMoveSound();
+                      notifyProfitMove({
+                        query: pollQueryRef.current,
+                        title: move.title,
+                        deltaProfitEur: move.deltaProfitEur,
+                        profitEur: move.profitEur,
+                        jumped: move.jumped,
+                      });
+                      toast.success(
+                        `📈 Profit jump — +€${Math.round(move.deltaProfitEur)} on "${move.title.slice(0, 40)}" → €${Math.round(move.profitEur)} net now${move.jumped > 1 ? ` (+${move.jumped - 1} more improved)` : ""}`,
+                        {
+                          description:
+                            "A listing you've seen before just became a better deal — check the Trend column in the results table.",
+                          duration: 12000,
+                        },
+                      );
+                    }
+                  }
+                } catch {
+                  // best-effort — trend/eval failures never block completion
                 }
               } else {
                 // Result reload failed (e.g. task evicted after a restart) —
