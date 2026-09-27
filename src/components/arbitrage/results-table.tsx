@@ -688,17 +688,53 @@ export const ResultsTable = forwardRef<ResultsTableHandle, ResultsTableProps>(fu
                     )}
                     {isColVisible("margin") && (
                     <TableCell className="text-right">
-                      <span
-                        className={`text-sm font-bold tabular-nums ${
-                          marginGreen
-                            ? "text-emerald-600 dark:text-emerald-400"
-                            : (l?.profit?.marginPct ?? 0) >= 15
-                              ? "text-amber-600 dark:text-amber-400"
-                              : "text-rose-600 dark:text-rose-400"
-                        }`}
-                      >
-                        {(l?.profit?.marginPct ?? 0).toFixed(1)}%
-                      </span>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <div className="flex cursor-help items-center justify-end gap-2">
+                            {/* Margin bar — width scales with margin (0–100% band),
+                                color encodes the decision zones: emerald ≥30 (strong),
+                                amber ≥15 (meets the min-margin gate), rose below.
+                                A tiny rose sliver marks negative margins so losing
+                                deals are visible at a glance while scanning rows. */}
+                            <div className="h-1.5 w-14 overflow-hidden rounded-full bg-muted">
+                              <div
+                                className={`h-full rounded-full transition-all ${
+                                  marginGreen
+                                    ? "bg-emerald-500"
+                                    : (l?.profit?.marginPct ?? 0) >= 15
+                                      ? "bg-amber-500"
+                                      : (l?.profit?.marginPct ?? 0) > 0
+                                        ? "bg-rose-400"
+                                        : "bg-rose-500"
+                                }`}
+                                style={{
+                                  width: `${Math.min(Math.max((l?.profit?.marginPct ?? 0) > 0 ? (l?.profit?.marginPct ?? 0) : 4, 4), 100)}%`,
+                                }}
+                              />
+                            </div>
+                            <span
+                              className={`text-sm font-bold tabular-nums ${
+                                marginGreen
+                                  ? "text-emerald-600 dark:text-emerald-400"
+                                  : (l?.profit?.marginPct ?? 0) >= 15
+                                    ? "text-amber-600 dark:text-amber-400"
+                                    : "text-rose-600 dark:text-rose-400"
+                              }`}
+                            >
+                              {(l?.profit?.marginPct ?? 0).toFixed(1)}%
+                            </span>
+                          </div>
+                        </TooltipTrigger>
+                        <TooltipContent side="left" className="max-w-xs p-3">
+                          <p className="text-[11px] font-semibold">
+                            Margin: {(l?.profit?.marginPct ?? 0).toFixed(1)}%
+                            {marginGreen ? " — strong deal" : (l?.profit?.marginPct ?? 0) >= 15 ? " — meets min-margin gate" : " — below min-margin gate"}
+                          </p>
+                          <p className="mt-1 text-[10px] text-muted-foreground">
+                            Net profit ÷ expected EU resale. Gates: ≥15% margin and ≥€30 net profit (configurable). Bar fills toward 100%.
+                          </p>
+                        </TooltipContent>
+                      </Tooltip>
                     </TableCell>
                     )}
                     {isColVisible("risk") && (

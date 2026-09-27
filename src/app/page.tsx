@@ -29,6 +29,7 @@ import {
   ArrowDownRight,
   ChevronDown,
   ExternalLink,
+  RotateCcw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -517,6 +518,62 @@ export default function Home() {
       setReevaluating(false);
     }
   }, [taskId, result]);
+  // Retry-failed: re-scrape ONLY the blocked/empty/error EU sites from the
+  // last scan and merge the fresh comps into the stored pool, then re-run
+  // matching + profit. Goofish is NEVER re-scraped — the whole point is to
+  // recover Vinted/KuantoKusta/Amazon data without burning Goofish's Baxia
+  // rate-limit budget on a full re-run.
+  const [retryingFailed, setRetryingFailed] = useState(false);
+  const [retryingSite, setRetryingSite] = useState<string | null>(null);
+  const failedEuSites = (result?.scraperStatuses ?? []).filter(
+    (s) => s.site !== "goofish" && (s.status === "blocked" || s.status === "error" || s.status === "empty"),
+  );
+  const handleRetryFailed = useCallback(async (onlySite?: string) => {
+    if (!taskId || !result) return;
+    const targets = onlySite
+      ? failedEuSites.filter((s) => s.site === onlySite)
+      : failedEuSites;
+    if (targets.length === 0) return;
+    setRetryingFailed(true);
+    setRetryingSite(onlySite ?? "__all__");
+    try {
+      const res = await fetch(`/api/tasks/retry_failed/${taskId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sites: targets.map((s) => s.site),
+          configOverrides: currentOverridesRef.current,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "retry failed" }));
+        throw new Error(err.error ?? "retry failed");
+      }
+      const rdata = (await res.json()) as {
+        freshComps: number;
+        retried: string[];
+        summary: { shown: number; total: number };
+      };
+      // Fetch the updated result
+      const rres = await fetch(
+        `/api/tasks/result/${taskId}?include_hidden=1`,
+        { cache: "no-store" },
+      );
+      if (rres.ok) {
+        const updated: TaskResult = await rres.json();
+        setResult(updated);
+      }
+      toast.success(
+        `Retried ${rdata.retried.length} site(s) — ${rdata.freshComps} new comps · ${rdata.summary.shown} viable of ${rdata.summary.total}`,
+      );
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      toast.error(`Retry failed: ${msg}`);
+    } finally {
+      setRetryingFailed(false);
+      setRetryingSite(null);
+    }
+  }, [taskId, result, failedEuSites]);
   // "Paused" means the scraper hit a hard block and is waiting for manual
   // paste resume. Degraded mode (mock data) is NOT paused — the pipeline
   // still completes successfully.
@@ -1126,7 +1183,11 @@ export default function Home() {
             {/* Per-scraper outcome breakdown — shows exactly which sites
                 produced data and which failed (with the reason), so the
                 user immediately knows what to debug. */}
-            <ScraperStatusPanel statuses={result.scraperStatuses ?? []} />
+            <ScraperStatusPanel
+              statuses={result.scraperStatuses ?? []}
+              onRetrySite={scanning ? undefined : (site) => handleRetryFailed(site)}
+              retryingSite={retryingSite}
+            />
             {/* Warnings */}
 {Array.isArray(result.warnings) && result.warnings.length > 0 && (
   <Alert className="border-amber-300 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/40">
@@ -1499,6 +1560,23 @@ export default function Home() {
                     )}
                     Re-evaluate
                   </Button>
+                  {failedEuSites.length > 0 && !scanning && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleRetryFailed()}
+                      disabled={retryingFailed || reevaluating || scanning || !taskId}
+                      title={`Re-scrape only the failed EU sites (${failedEuSites.map((s) => s.label).join(", ")}) and merge results — Goofish is NOT re-scraped`}
+                      className="border-amber-500/40 text-amber-600 hover:bg-amber-500/10 hover:text-amber-700 dark:text-amber-400 dark:hover:text-amber-300"
+                    >
+                      {retryingFailed ? (
+                        <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
+                      )}
+                      Retry failed ({failedEuSites.length})
+                    </Button>
+                  )}
                   <Button
                     variant="outline"
                     size="sm"

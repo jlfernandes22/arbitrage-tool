@@ -32,6 +32,8 @@ import {
   Activity,
   ClipboardCopy,
   Check,
+  RotateCcw,
+  Loader2,
 } from "lucide-react";
 import type { ScraperStatus } from "./types";
 
@@ -107,7 +109,17 @@ function rateColor(rate: number | null): string {
   return "bg-red-500";
 }
 
-export function ScraperStatusPanel({ statuses }: { statuses: ScraperStatus[] }) {
+export function ScraperStatusPanel({
+  statuses,
+  onRetrySite,
+  retryingSite,
+}: {
+  statuses: ScraperStatus[];
+  /** When provided, failed non-Goofish cards render a per-site retry button. */
+  onRetrySite?: (site: ScraperStatus["site"]) => void;
+  /** Site currently being retried (spinner state). */
+  retryingSite?: string | null;
+}) {
   const [open, setOpen] = useState(true);
   const [copied, setCopied] = useState(false);
   const [health, setHealth] = useState<SiteHealth[] | null>(null);
@@ -209,7 +221,30 @@ export function ScraperStatusPanel({ statuses }: { statuses: ScraperStatus[] }) 
                             <span aria-hidden>{SITE_FLAGS[s.site] ?? "🌐"}</span>
                             <span className="truncate">{s.label}</span>
                           </span>
-                          <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                          <span className="flex shrink-0 items-center gap-1">
+                            {onRetrySite && s.site !== "goofish" &&
+                              (s.status === "blocked" || s.status === "error" || s.status === "empty") && (
+                              <button
+                                type="button"
+                                aria-label={`Retry ${s.label} only`}
+                                title={`Re-scrape just ${s.label} and merge results (Goofish untouched)`}
+                                disabled={retryingSite != null}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  e.preventDefault();
+                                  onRetrySite(s.site);
+                                }}
+                                className="rounded-md border border-amber-500/40 bg-amber-500/10 p-1 text-amber-600 transition-colors hover:bg-amber-500/20 hover:text-amber-700 disabled:cursor-not-allowed disabled:opacity-50 dark:text-amber-400"
+                              >
+                                {retryingSite === s.site ? (
+                                  <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
+                                ) : (
+                                  <RotateCcw className="h-3 w-3" aria-hidden />
+                                )}
+                              </button>
+                            )}
+                            <Icon className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
+                          </span>
                         </div>
                         <Badge variant="outline" className={`w-fit text-[10px] ${meta.chipClass}`}>
                           {meta.label}
