@@ -20,6 +20,8 @@ import {
   Star,
   Play,
   StarOff,
+  Search,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import type { SavedQuery } from "@/hooks/use-saved-queries";
@@ -84,6 +86,9 @@ export function TaskHistory({
 }: TaskHistoryProps) {
   const [tasks, setTasks] = useState<HistoryTask[]>([]);
   const [loading, setLoading] = useState(true);
+  // Client-side filter — as history grows (long-running arbitrage sessions),
+  // finding a past scan by product name becomes the primary navigation.
+  const [filter, setFilter] = useState("");
   useEffect(() => {
     let cancelled = false;
     let interval: ReturnType<typeof setInterval> | null = null;
@@ -143,6 +148,10 @@ export function TaskHistory({
     return `${Math.floor(hrs / 24)}d ago`;
   };
   const hasSaved = savedQueries.length > 0;
+  const normalizedFilter = filter.trim().toLowerCase();
+  const filteredTasks = normalizedFilter
+    ? tasks.filter((t) => t.query.toLowerCase().includes(normalizedFilter))
+    : tasks;
   return (
     <Card className="flex flex-col">
       <CardHeader className="pb-3">
@@ -168,6 +177,28 @@ export function TaskHistory({
             </Button>
           )}
         </CardTitle>
+        {tasks.length > 5 && (
+          <div className="relative mt-1">
+            <Search className="pointer-events-none absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" aria-hidden />
+            <input
+              type="text"
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              placeholder="Filter scans…"
+              aria-label="Filter scan history by query"
+              className="h-7 w-full rounded-md border bg-background pl-7 pr-6 text-xs outline-none transition-colors placeholder:text-muted-foreground/60 focus:border-primary/40 focus:ring-1 focus:ring-primary/20"
+            />
+            {filter && (
+              <button
+                onClick={() => setFilter("")}
+                aria-label="Clear filter"
+                className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded text-muted-foreground/70 transition-colors hover:text-foreground"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            )}
+          </div>
+        )}
       </CardHeader>
       <CardContent className="flex-1 p-0">
         {/* ─── Saved Queries (pinned) ─────────────────────────────── */}
@@ -255,9 +286,13 @@ export function TaskHistory({
             <p className="py-8 text-center text-xs text-muted-foreground">
               No scans yet
             </p>
+          ) : filteredTasks.length === 0 ? (
+            <p className="py-8 text-center text-xs text-muted-foreground">
+              No scans match “{filter}”
+            </p>
           ) : (
             <div className="space-y-1.5">
-              {tasks.map((t) => {
+              {filteredTasks.map((t) => {
                 const isActive = t.task_id === activeTaskId;
                 const isDone = t.status === "done";
                 const isRunning = t.status !== "done" && t.status !== "error" && t.status !== "paused" && t.status !== "cancelled";
