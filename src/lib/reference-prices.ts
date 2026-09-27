@@ -39,7 +39,17 @@ function inferCategory(standardKey: string): string {
   if (/^Steam Deck|^Legion Go|^ROG Ally/i.test(standardKey)) return "gaming";
   return "iphone";
 }
-/** Seed the DB from the JSON file if the table is empty. Idempotent. */
+/**
+ * Seed the DB from the JSON file. Two behaviours:
+ *   1. Empty table  → bulk insert the full JSON seed (first run).
+ *   2. Existing row → additive sync: insert only the standardKeys that are
+ *      missing. This is what ships NEW reference entries (e.g. newly added
+ *      iPhone models) to installs whose DB was already seeded with the old
+ *      JSON — a pure count()>0 check would permanently hide them, and the
+ *      profit engine would return €0 resale for those models.
+ * Admin edits in the DB are NEVER overwritten — only missing keys are added.
+ * Idempotent.
+ */
 export async function ensureSeeded(): Promise<void> {
   if (seeded) return;
   // Only one seed attempt runs at a time; concurrent callers await the same
@@ -48,20 +58,42 @@ export async function ensureSeeded(): Promise<void> {
     seedingPromise = (async () => {
       try {
         const count = await db.referencePrice.count();
-        if (count > 0) {
+        if (count === 0) {
+          // First run — insert everything.
+          const rows = Object.entries(seedRecord).map(([key, p]) => ({
+            standardKey: key,
+            category: inferCategory(key),
+            newPrice: p.new,
+            excellentPrice: p.excellent,
+            veryGoodPrice: p.very_good,
+            goodPrice: p.good,
+            fairPrice: p.fair ?? Math.round(p.good * 0.75),
+          }));
+          await db.referencePrice.createMany({ data: rows });
           seeded = true;
           return;
         }
-        const rows = Object.entries(seedRecord).map(([key, p]) => ({
-          standardKey: key,
-          category: inferCategory(key),
-          newPrice: p.new,
-          excellentPrice: p.excellent,
-          veryGoodPrice: p.very_good,
-          goodPrice: p.good,
-          fairPrice: p.fair ?? Math.round(p.good * 0.75),
-        }));
-        await db.referencePrice.createMany({ data: rows });
+        // Additive sync — find JSON keys absent from the DB and insert them.
+        const existing = await db.referencePrice.findMany({
+          select: { standardKey: true },
+        });
+        const existingKeys = new Set(existing.map((r) => r.standardKey));
+        const missing = Object.entries(seedRecord).filter(
+          ([key]) => !existingKeys.has(key),
+        );
+        if (missing.length > 0) {
+          const rows = missing.map(([key, p]) => ({
+            standardKey: key,
+            category: inferCategory(key),
+            newPrice: p.new,
+            excellentPrice: p.excellent,
+            veryGoodPrice: p.very_good,
+            goodPrice: p.good,
+            fairPrice: p.fair ?? Math.round(p.good * 0.75),
+          }));
+          await db.referencePrice.createMany({ data: rows });
+          console.log(`[reference-prices] Synced ${missing.length} new seed entries into the DB`);
+        }
         seeded = true;
       } catch {
         // DB unavailable — callers fall back to JSON

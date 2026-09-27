@@ -112,11 +112,21 @@ export async function GET(req: NextRequest) {
       return Array.from(cards).slice(0, 5).map(card => {
         const h2 = card.querySelector("h2");
         const titleEl = card.querySelector("h2 a span, h2 span.a-text-normal, h2 span");
-        const priceEl = card.querySelector("[class*='a-price'] [class*='a-offscreen']");
         const linkEl = card.querySelector<HTMLAnchorElement>("h2 a[href*='/dp/'], a[href*='/dp/'], a[href]");
+        // Price extraction mirrors the production scraper: the offscreen
+        // span alone misses the "Ver opciones" layout — fall back to the
+        // card's textContent so the sample shows the real price when one
+        // exists (and "NO PRICE" only when Amazon truly renders none).
+        const priceEl = card.querySelector("[class*='a-price'] [class*='a-offscreen'], .a-price .a-offscreen");
+        let price = priceEl?.textContent?.trim() || "";
+        if (!price) {
+          const allText = (card.textContent || "").replace(/\s+/g, " ").trim();
+          const m = allText.match(/(\d[\d\s.\u00A0]*(?:,\d{1,2})?)\s*€/);
+          if (m) price = m[0];
+        }
         return {
           title: (titleEl?.textContent?.trim() || h2?.getAttribute("aria-label") || "").substring(0, 80),
-          price: priceEl?.textContent?.trim() || "NO PRICE",
+          price: price || "NO PRICE",
           url: linkEl?.href?.substring(0, 90) || "NO LINK",
         };
       });
