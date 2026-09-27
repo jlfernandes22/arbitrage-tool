@@ -164,6 +164,33 @@ async function scrapeVintedLive(euQuery: string, maxPages: number): Promise<{ co
     const allItems: Array<{ title: string; priceEur: number; condition: string; brand: string; url?: string }> = [];
     const seenTitles = new Set<string>();
     try {
+      // ── Step 0: Homepage warm-up ─────────────────────────────────────
+      // Verified live: the Datadome challenge clears MUCH more readily on
+      // the bare homepage than on a deep catalog link (observed: homepage
+      // cleared in ~4s on a flagged IP while the catalog deep-link stayed
+      // challenged). Clearing it here sets the datadome cookie in ctx2, so
+      // the subsequent catalog navigation skips the challenge entirely.
+      // If the homepage still doesn't clear, fall through — the catalog
+      // attempt below keeps its own 35s challenge wait.
+      try {
+        await page2.goto("https://www.vinted.pt/", { waitUntil: "domcontentloaded", timeout: 25000 });
+        const HOME_WAIT_MS = 20000;
+        const h0 = Date.now();
+        while (Date.now() - h0 < HOME_WAIT_MS) {
+          const hState = await page2.evaluate(() => ({
+            title: document.title || "",
+            body: (document.body?.innerText || "").substring(0, 300),
+            homeMarkers: document.querySelectorAll("a[href*='/items/'], header, [class*='header']").length,
+          })).catch(() => ({ title: "", body: "", homeMarkers: 0 }));
+          const challenged = looksLikeChallenge(hState.title, hState.body);
+          if (!challenged && (hState.homeMarkers > 0 || hState.body.length > 100)) break;
+          if (!challenged && hState.title.toLowerCase().includes("vinted")) break;
+          await page2.waitForTimeout(1500);
+        }
+      } catch {
+        // homepage warm-up is best-effort — ignore failures
+      }
+
       const firstUrl = buildVintedSearchUrl(euQuery, 1);
       await page2.goto(firstUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
       let challengeCleared = false;

@@ -195,6 +195,44 @@ All of these are overridable live from the **Configuration Overrides** panel
 
 ---
 
+## 🆕 What's New (latest round of scraper fixes)
+
+- **✅ Amazon.es scraper fixed** — the HTTP-fetch strategy now sends a MINIMAL
+  header set (User-Agent + Accept-Language only). Verified live: sending the
+  full `Sec-Ch-Ua` / `Sec-Fetch-*` client-hint set from a non-browser TLS
+  fingerprint is itself a bot tell and was triggering the "Lo sentimos" block
+  page (HTTP 503/200-with-block-page). The same fix was applied to the
+  Playwright fallback: no more `extraHTTPHeaders` overrides (forcing
+  `Sec-Fetch-Site: none` on Amazon's own XHRs contradicts real browser
+  behaviour), and the UA is now built from the REAL engine version at runtime.
+- **🧪 Vinted homepage warm-up** — the Datadome challenge clears much more
+  readily on the bare homepage than on a deep catalog link, so the scraper now
+  visits `vinted.pt` first and waits for the challenge to clear before
+  navigating to the search URL (verified: homepage cleared in ~4s on a flagged
+  IP). On datacenter IPs Datadome can still block — reported honestly.
+- **🔧 KuantoKusta hardening** — removed the same header-override bot tell,
+  and added a browser-crash retry (parallel scans can kill the standalone
+  Chromium process mid-run; that's now retried once instead of zeroing the
+  source).
+- **📱 Complete iPhone catalog** — every iPhone model is now searchable, from
+  the 2012 iPhone 5 through the (future) iPhone 18 series: 5 / 5c / 5s / 6 /
+  6 Plus / 6s / 6s Plus / 7 / 7 Plus / 8 / 8 Plus / SE 1st gen (2016) / X /
+  XR / XS / XS Max / 11–17 / 16e / 18. Fixed: `苹果X`-style listings were
+  silently dropped by the category detector (letter models, not digits), and
+  "SE 2016" / "SE 一代" resolved to the wrong generation. Abbreviations like
+  "8p", "6sp", "7+" parse correctly. Added 71 reference-price entries
+  (iPhone 18 series + missing storages + all older models) — auto-synced to
+  the DB on next lookup. The UI generation/model pickers and the 16/32GB
+  storage options now match.
+- **🏷️ Honest "Market Preview" rows** — when Goofish is Baxia-blocked and
+  returns 0 listings, the pipeline injects a ¥0 synthetic listing so the EU
+  market-price side still renders. It used to pollute the viable-lead stats
+  ("1 viable, 620% margin"). It is now flagged `synthetic`, rendered with an
+  amber **MARKET PREVIEW** badge, and excluded from all viable/margin/profit
+  summary metrics.
+
+---
+
 ## 📸 Screenshots
 
 ![Dashboard](https://via.placeholder.com/1200x675?text=Dashboard+%E2%80%94+add+screenshot)

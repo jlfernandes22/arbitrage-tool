@@ -315,20 +315,11 @@ async function scrapeKuantokustaLive(
       userAgent: `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${ver}.0.0.0 Safari/537.36`,
       locale: "pt-PT",
       viewport: { width: 1920, height: 1080 },
-      extraHTTPHeaders: {
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-        "Accept-Language": "pt-PT,pt;q=0.9,en;q=0.8",
-        "Accept-Encoding": "gzip, deflate, br",
-        "Cache-Control": "no-cache",
-        "Sec-Ch-Ua": `"Chromium";v="${ver}", "Not_A Brand";v="24", "Google Chrome";v="${ver}"`,
-        "Sec-Ch-Ua-Mobile": "?0",
-        "Sec-Ch-Ua-Platform": '"Windows"',
-        "Sec-Fetch-Dest": "document",
-        "Sec-Fetch-Mode": "navigate",
-        "Sec-Fetch-Site": "none",
-        "Sec-Fetch-User": "?1",
-        "Upgrade-Insecure-Requests": "1",
-      },
+      // NO extraHTTPHeaders — same fix as the Amazon scraper: forcing
+      // Sec-Fetch-* / Sec-Ch-Ua on every request (including Akamai's own
+      // sensor XHRs, which must carry `Sec-Fetch-Mode: cors`) contradicts
+      // real browser behaviour and is itself a bot flag. Chromium emits
+      // correct per-request headers natively.
     });
     await ctx.addInitScript(() => {
       Object.defineProperty(navigator, "webdriver", { get: () => undefined });
@@ -462,7 +453,22 @@ export async function scrapeKuantokusta(
   const maxPages =
     opts?.maxPages && opts.maxPages > 0 ? opts.maxPages : config.scraping.max_pages;
   await sleep(jitter(config.scraping.jitter_min_ms, config.scraping.jitter_max_ms));
-  const { comps, status, blocked } = await scrapeKuantokustaLive(euQuery, maxPages);
+  let { comps, status, blocked } = await scrapeKuantokustaLive(euQuery, maxPages);
+  // Browser-crash retry: when several scans run in parallel the standalone
+  // KK browser can be killed mid-run ("Target page, context or browser has
+  // been closed" / "Browser has been closed"). That's an environment
+  // failure, not a block — retry ONCE with a fresh browser before
+  // reporting, so a transient OOM doesn't zero out the whole source.
+  const BROWSER_CRASH = /browser ?has been closed|target page, context or browser|browser disconnected|session closed/i;
+  if (comps.length === 0 && BROWSER_CRASH.test(status)) {
+    await sleep(jitter(1500, 3000));
+    const retry = await scrapeKuantokustaLive(euQuery, maxPages);
+    if (retry.comps.length > 0 || !BROWSER_CRASH.test(retry.status)) {
+      comps = retry.comps;
+      status = retry.status;
+      blocked = retry.blocked;
+    }
+  }
   if (comps.length > 0) {
     return { comps, degraded: false, liveFetchStatus: status };
   }

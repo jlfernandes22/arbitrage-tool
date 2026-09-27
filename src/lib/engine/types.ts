@@ -50,6 +50,7 @@ export interface GoofishListing {
   sellerRating?: number; // seller positive feedback rate (0-100), from listing page
   imageCount?: number; // actual image count from listing page (not search page thumbnail)
   conditionFlags?: string[]; // detected condition keywords (维修/换屏/无盒 etc.)
+  synthetic?: boolean; // placeholder row injected when Goofish returned 0 — not a real lead
 }
 export interface EuMarketComp {
   id: string;

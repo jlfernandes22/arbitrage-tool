@@ -462,6 +462,14 @@ export const ResultsTable = forwardRef<ResultsTableHandle, ResultsTableProps>(fu
                                 </TooltipContent>
                               </Tooltip>
                               <div className="flex flex-wrap items-center gap-1">
+                                {listing.synthetic && (
+                                  <Badge
+                                    variant="outline"
+                                    className="h-4 px-1.5 text-[10px] leading-none border-amber-400/60 bg-amber-500/10 text-amber-600 dark:text-amber-400"
+                                  >
+                                    MARKET PREVIEW
+                                  </Badge>
+                                )}
                                 {n && n.condition !== "unknown" && (
                                   <Badge
                                     variant="outline"
@@ -587,6 +595,14 @@ export const ResultsTable = forwardRef<ResultsTableHandle, ResultsTableProps>(fu
                     {/* Condition column — shows condition flags + seller rating */}
                     <TableCell className="max-w-[140px]">
                       <div className="flex flex-wrap gap-1">
+                        {listing.synthetic && (
+                          <Badge
+                            variant="outline"
+                            className="h-4 px-1.5 text-[10px] leading-none border-amber-400/60 bg-amber-500/10 text-amber-600 dark:text-amber-400"
+                          >
+                            MARKET PREVIEW
+                          </Badge>
+                        )}
                         {n && n.condition !== "unknown" && (
                           <Badge
                             variant="outline"

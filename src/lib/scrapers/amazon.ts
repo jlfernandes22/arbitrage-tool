@@ -186,38 +186,67 @@ function parseAmazonHtml(
  * same page 1 every iteration and then `break` (because dedup reported
  * `newCount === 0` on iteration 2). Multi-page fetching was silently broken
  * for the HTTP strategy.
+ *
+ * Headers: MINIMAL set only (User-Agent + Accept-Language). Verified live:
+ * Amazon serves a full results page (200, ~1.9 MB, 57 cards) to a bare
+ * UA+language request, but blocks requests that send the full Sec-Ch-Ua /
+ * Sec-Fetch-* client-hint set — those hints contradict the non-browser
+ * TLS fingerprint (a classic bot tell), so sending them is an instant
+ * flag. Less is more here.
+ *
+ * Returns `blocked: true` when the response is a block page ("Lo
+ * sentimos…", robot check) so the caller can retry instead of parsing a
+ * page that will never yield cards.
  */
-async function fetchAmazonHtml(euQuery: string, page: number = 1): Promise<{ html: string | null; status: number }> {
+async function fetchAmazonHtml(
+  euQuery: string,
+  page: number = 1,
+): Promise<{ html: string | null; status: number; blocked: boolean }> {
   const url = buildAmazonSearchUrl(euQuery, page);
-  try {
-    const res = await fetch(url, {
-      signal: AbortSignal.timeout(15000),
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
-        "Accept-Encoding": "gzip, deflate, br",
-        "Cache-Control": "no-cache",
-        "Sec-Ch-Ua": '"Chromium";v="131", "Not_A Brand";v="24", "Google Chrome";v="131"',
-        "Sec-Ch-Ua-Mobile": "?0",
-        "Sec-Ch-Ua-Platform": '"Windows"',
-        "Sec-Fetch-Dest": "document",
-        "Sec-Fetch-Mode": "navigate",
-        "Sec-Fetch-Site": "none",
-        "Sec-Fetch-User": "?1",
-        "Upgrade-Insecure-Requests": "1",
-      },
-    });
-    if (res.ok) {
-      const html = await res.text();
-      if (html && html.length > 500) {
-        return { html, status: res.status };
+  // Two minimal header variants — rotate when the first is blocked.
+  const headerVariants: Array<Record<string, string>> = [
+    {
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+      "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
+    },
+    {
+      "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36",
+      "Accept-Language": "es-ES,es;q=0.9",
+    },
+  ];
+  for (let attempt = 0; attempt < headerVariants.length; attempt++) {
+    try {
+      const res = await fetch(url, {
+        signal: AbortSignal.timeout(15000),
+        headers: headerVariants[attempt],
+      });
+      if (res.ok) {
+        const html = await res.text();
+        if (html && html.length > 500) {
+          // Distinguish a real results page from a block page — both can
+          // return HTTP 200. A block page has the "sentimos" markers but
+          // NO search-result cards.
+          const hasCards = html.includes('data-component-type="s-search-result"') || html.includes("s-result-item");
+          const blocked = !hasCards && looksLikeBlockPage(html.slice(0, 20000));
+          if (blocked && attempt < headerVariants.length - 1) {
+            await sleep(jitter(800, 1600));
+            continue; // retry with the next header variant
+          }
+          return { html, status: res.status, blocked };
+        }
       }
+      if (attempt >= headerVariants.length - 1) {
+        return { html: null, status: res.status, blocked: false };
+      }
+      await sleep(jitter(800, 1600));
+    } catch {
+      if (attempt >= headerVariants.length - 1) {
+        return { html: null, status: 0, blocked: false };
+      }
+      await sleep(jitter(800, 1600));
     }
-    return { html: null, status: res.status };
-  } catch {
-    return { html: null, status: 0 };
   }
+  return { html: null, status: 0, blocked: false };
 }
 
 /**
@@ -235,45 +264,53 @@ function looksLikeBlockPage(bodyText: string): boolean {
 // ── Session rotation ──────────────────────────────────────────────────
 // Amazon's bot detection is INTERMITTENT and session-based: a flagged
 // session keeps getting served block pages. Retrying in the SAME context
-// is futile — we rotate to a FRESH context with a different Windows Chrome
-// UA (clean cookies, clean WAF token) and retry from scratch.
-const AMAZON_UA_POOL = [
-  {
-    userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-    secChUa: '"Chromium";v="131", "Not_A Brand";v="24", "Google Chrome";v="131"',
-  },
-  {
-    userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
-    secChUa: '"Chromium";v="128", "Not_A Brand";v="24", "Google Chrome";v="128"',
-  },
-  {
-    userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-    secChUa: '"Chromium";v="125", "Not_A Brand";v="24", "Google Chrome";v="125"',
-  },
+// is futile — we rotate to a FRESH context (clean cookies, clean WAF
+// token) and retry from scratch.
+//
+// The UA is built from the REAL engine version at runtime (probed via
+// navigator.userAgent) — a UA claiming Chrome/125 on a Chromium-141
+// engine is detectable through navigator.userAgentData and gets flagged.
+const AMAZON_PLATFORM_POOL = [
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{ver}.0.0.0 Safari/537.36",
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{ver}.0.0.0 Safari/537.36",
 ];
+
+/**
+ * Probe the REAL Chromium major version so the UA always matches the
+ * engine that actually renders the page.
+ */
+async function probeEngineVersion(browser: import("playwright").Browser): Promise<number> {
+  try {
+    const ctx = await browser.newContext();
+    const page = await ctx.newPage();
+    const ver = await page.evaluate(() => {
+      const m = navigator.userAgent.match(/Chrome\/(\d+)/);
+      return m ? parseInt(m[1], 10) : 0;
+    });
+    await page.close().catch(() => {});
+    await ctx.close().catch(() => {});
+    return Number.isFinite(ver) && ver > 0 ? ver : 131;
+  } catch {
+    return 131;
+  }
+}
 
 async function createAmazonContext(
   browser: import("playwright").Browser,
   uaIndex: number,
+  engineVer: number = 131,
 ): Promise<import("playwright").BrowserContext> {
-  const ua = AMAZON_UA_POOL[uaIndex % AMAZON_UA_POOL.length];
+  const ua = AMAZON_PLATFORM_POOL[uaIndex % AMAZON_PLATFORM_POOL.length].replace("{ver}", String(engineVer));
+  // NO extraHTTPHeaders here — verified live: overriding Sec-Fetch-* /
+  // Sec-Ch-Ua forces EVERY request (including Amazon's own XHR/service
+  // worker calls) to claim "navigate / site:none", which contradicts real
+  // browser behaviour and gets flagged. Chromium generates correct
+  // per-request headers natively; the debug run with zero header overrides
+  // passes the WAF while the header-overridden one is blocked.
   const ctx = await browser.newContext({
-    userAgent: ua.userAgent,
+    userAgent: ua,
     locale: "es-ES",
     viewport: { width: 1920, height: 1080 },
-    extraHTTPHeaders: {
-      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-      "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
-      "Accept-Encoding": "gzip, deflate, br",
-      "Sec-Ch-Ua": ua.secChUa,
-      "Sec-Ch-Ua-Mobile": "?0",
-      "Sec-Ch-Ua-Platform": '"Windows"',
-      "Sec-Fetch-Dest": "document",
-      "Sec-Fetch-Mode": "navigate",
-      "Sec-Fetch-Site": "none",
-      "Sec-Fetch-User": "?1",
-      "Upgrade-Insecure-Requests": "1",
-    },
   });
   await ctx.addInitScript(() => {
     Object.defineProperty(navigator, "webdriver", { get: () => undefined });
@@ -321,9 +358,11 @@ async function scrapeAmazonLive(
 
   // Strategy 1: Plain HTTP fetch (works from most IPs — Amazon returns full HTML)
   let usedFallbackParser = false;
+  let httpBlocked = false;
   for (let pageNum = 1; pageNum <= maxPages; pageNum++) {
-    const { html } = await fetchAmazonHtml(euQuery, pageNum);
+    const { html, blocked: pageBlocked } = await fetchAmazonHtml(euQuery, pageNum);
     if (html) {
+      httpBlocked = pageBlocked;
       const { items, fallbackUsed } = parseAmazonHtml(html);
       if (fallbackUsed) usedFallbackParser = true;
       let newCount = 0;
@@ -387,10 +426,13 @@ async function scrapeAmazonLive(
     ],
   });
   try {
+    // Probe the real engine version ONCE so every rotated session presents
+    // a UA that matches the actual Chromium rendering the page.
+    const engineVer = await probeEngineVersion(freshBrowser);
     // Active context/page — ROTATED to a fresh session (new UA, no cookies)
     // whenever Amazon blocks the current one. Retrying a flagged session in
     // the same context never recovers.
-    let ctx = await createAmazonContext(freshBrowser, 0);
+    let ctx = await createAmazonContext(freshBrowser, 0, engineVer);
     let page = await ctx.newPage();
 
     // ── Step 1: Visit the home page (best-effort) ────────────────────
@@ -422,7 +464,7 @@ async function scrapeAmazonLive(
       }
       if (!homeLoaded && attempt < 2) {
         await ctx.close().catch(() => {});
-        ctx = await createAmazonContext(freshBrowser, attempt + 1);
+        ctx = await createAmazonContext(freshBrowser, attempt + 1, engineVer);
         page = await ctx.newPage();
         await sleep(jitter(2000, 4000)); // backoff before the next attempt
       }
@@ -432,7 +474,7 @@ async function scrapeAmazonLive(
     // own retries). Amazon sometimes only blocks the home endpoint.
     if (!homeLoaded) {
       await ctx.close().catch(() => {});
-      ctx = await createAmazonContext(freshBrowser, 0);
+      ctx = await createAmazonContext(freshBrowser, 0, engineVer);
       page = await ctx.newPage();
       console.log("[Amazon] Home page blocked — trying the search page directly with a fresh session");
     }
@@ -486,7 +528,7 @@ async function scrapeAmazonLive(
           // A flagged session keeps getting blocked — start a completely
           // fresh context (no cookies, different UA) and retry.
           await ctx.close().catch(() => {});
-          ctx = await createAmazonContext(freshBrowser, attempt + 1);
+          ctx = await createAmazonContext(freshBrowser, attempt + 1, engineVer);
           page = await ctx.newPage();
           await sleep(jitter(1500, 3000));
         }

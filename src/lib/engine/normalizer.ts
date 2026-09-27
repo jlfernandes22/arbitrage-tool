@@ -79,16 +79,35 @@ const IPHONE_MODELS: Array<{
   { re: /(?:iphone|苹果)\s*xs\s*max/i, family: "iPhone XS Max", model: "iPhone XS Max" },
   { re: /(?:iphone|苹果)\s*xs/i, family: "iPhone XS", model: "iPhone XS" },
   { re: /(?:iphone|苹果)\s*xr/i, family: "iPhone XR", model: "iPhone XR" },
-  // iPhone SE (2nd gen 2020 / 3rd gen 2022) — match BEFORE bare X,
-  // and disambiguate by year when the title includes one.
-  { re: /(?:iphone|苹果)\s*se\s*(?:3|三代|三|2022|第三代)/i, family: "iPhone SE 2022", model: "iPhone SE 2022" },
-  { re: /(?:iphone|苹果)\s*se\s*(?:2|二代|二|2020|第二代)/i, family: "iPhone SE 2020", model: "iPhone SE 2020" },
+  // iPhone SE — generation disambiguation. Order matters: the year-bearing
+  // patterns run BEFORE the bare digit ones and every bare digit carries a
+  // (?![0-9]) guard, otherwise "SE 2016" hits the `2` of the 2020 pattern
+  // and "SE 32GB" hits the `3` of the 2022 pattern.
+  { re: /(?:iphone|苹果)\s*se\s*(?:2016|第一代|一代|1)(?![0-9])/i, family: "iPhone SE 2016", model: "iPhone SE 2016" },
+  { re: /(?:iphone|苹果)\s*se\s*(?:2020|第二代|二代|2)(?![0-9])/i, family: "iPhone SE 2020", model: "iPhone SE 2020" },
+  { re: /(?:iphone|苹果)\s*se\s*(?:2022|第三代|三代|3)(?![0-9])/i, family: "iPhone SE 2022", model: "iPhone SE 2022" },
   { re: /(?:iphone|苹果)\s*se/i, family: "iPhone SE 2022", model: "iPhone SE 2022" },
   // iPhone X (2017) — LAST so "XS"/"XR" patterns above win
   { re: /(?:iphone|苹果)\s*x(?![a-z0-9])/i, family: "iPhone X", model: "iPhone X" },
   // Chinese nickname "苹果X" is covered above; also handle "iPhone 10"
   // (rare but seen on Goofish) as iPhone X.
   { re: /(?:iphone|苹果)\s*10(?![a-z0-9])/i, family: "iPhone X", model: "iPhone X" },
+  // ── Older iPhone catalog (8 → 5). Longest variant first within each
+  // generation: "plus/sp/p" abbreviations before the bare number, and
+  // "6s"/"5s"/"5c" before "6"/"5" — otherwise "6sp" would normalize to
+  // "iPhone 6s" and "5s" to "iPhone 5". These are common cheap listings
+  // on Goofish and were silently dropped before.
+  { re: /(?:iphone|苹果)\s*8\s*(?:plus|\+|p)(?![a-z0-9])/i, family: "iPhone 8 Plus", model: "iPhone 8 Plus" },
+  { re: /(?:iphone|苹果)\s*8(?![a-z0-9])/i, family: "iPhone 8", model: "iPhone 8" },
+  { re: /(?:iphone|苹果)\s*7\s*(?:plus|\+|p)(?![a-z0-9])/i, family: "iPhone 7 Plus", model: "iPhone 7 Plus" },
+  { re: /(?:iphone|苹果)\s*7(?![a-z0-9])/i, family: "iPhone 7", model: "iPhone 7" },
+  { re: /(?:iphone|苹果)\s*6\s*s\s*(?:plus|\+|p)(?![a-z0-9])/i, family: "iPhone 6s Plus", model: "iPhone 6s Plus" },
+  { re: /(?:iphone|苹果)\s*6\s*s(?![a-z0-9])/i, family: "iPhone 6s", model: "iPhone 6s" },
+  { re: /(?:iphone|苹果)\s*6\s*(?:plus|\+|p)(?![a-z0-9])/i, family: "iPhone 6 Plus", model: "iPhone 6 Plus" },
+  { re: /(?:iphone|苹果)\s*6(?![a-z0-9])/i, family: "iPhone 6", model: "iPhone 6" },
+  { re: /(?:iphone|苹果)\s*5\s*s(?![a-z0-9])/i, family: "iPhone 5s", model: "iPhone 5s" },
+  { re: /(?:iphone|苹果)\s*5\s*c(?![a-z0-9])/i, family: "iPhone 5c", model: "iPhone 5c" },
+  { re: /(?:iphone|苹果)\s*5(?![a-z0-9])/i, family: "iPhone 5", model: "iPhone 5" },
 ];
 // MacBook detection
 const MACBOOK_MODELS: Array<{
@@ -448,7 +467,9 @@ export function translateConditionRaw(raw: string | undefined | null): string | 
   return map[raw] ?? raw;
 }
 function detectCategory(text: string): Category | null {
-  if (/iphone|苹果手机|苹果\s*\d/i.test(text)) return "iphone";
+  // "苹果X" / "苹果SE" / "苹果XR" carry a LETTER model, not a digit —
+  // the old digit-only check dropped every 苹果X-family listing to NULL.
+  if (/iphone|苹果手机|苹果\s*(?:\d|x|se)/i.test(text)) return "iphone";
   if (/macbook|mbp|mba|苹果笔记本|苹果电脑/i.test(text)) return "macbook";
   if (/ipad|苹果平板/i.test(text)) return "ipad";
   if (/ps5|playstation\s*5|索尼\s*5|索尼ps5/i.test(text)) return "ps5";

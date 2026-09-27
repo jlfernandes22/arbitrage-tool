@@ -99,15 +99,21 @@ export function buildSummary(
   listings: EvaluatedListing[],
   cfg: AppConfig,
 ): TaskSummary {
-  const shown = listings.filter((l) => !l.hidden);
+  // Synthetic placeholder rows (injected when Goofish returned 0) have a ¥0
+  // acquisition cost — including them produced absurd "620% margin" viable
+  // stats for scans where nothing was actually buyable. They stay in the
+  // listings array (the Market Price Preview panel still uses their comps)
+  // but are excluded from every viable-lead metric here.
+  const real = listings.filter((l) => !l.listing.synthetic);
+  const shown = real.filter((l) => !l.hidden);
   const isScamHidden = (l: EvaluatedListing) =>
     l.scam.dropped || l.scam.riskScore > cfg.scam_filter.hide_threshold;
-  const hiddenScam = listings.filter((l) => l.hidden && isScamHidden(l)).length;
-  const hiddenProfit = listings.filter(
+  const hiddenScam = real.filter((l) => l.hidden && isScamHidden(l)).length;
+  const hiddenProfit = real.filter(
     (l) => l.hidden && !isScamHidden(l),
   ).length;
   const margins = shown.map((l) => l.profit.marginPct);
-  const risks = listings.map((l) => l.scam.riskScore);
+  const risks = real.map((l) => l.scam.riskScore);
   const profits = shown.map((l) => l.profit.netProfitEur);
   return {
     total: listings.length,
@@ -511,6 +517,7 @@ async function runPipelineInner(taskId: string, gen: number): Promise<void> {
         sellerVerified: false, sellerVerifiedTransactions: 0,
         rawText: state.query, source: "goofish" as const,
         normalized: normalizeListing(state.query, state.query),
+        synthetic: true,
       }];
     }
     // Strict per-listing comp filtering (Phase 10): run the matching engine

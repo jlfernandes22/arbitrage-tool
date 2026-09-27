@@ -53,6 +53,11 @@ export interface GoofishListing {
   sellerRating?: number;
   imageCount?: number;
   conditionFlags?: string[];
+  // True for the placeholder row the pipeline injects when Goofish returns
+  // 0 listings (e.g. Baxia CAPTCHA). It carries ¥0 cost, so profit/margin
+  // numbers for it are meaningless — the UI renders it as a "Market
+  // Preview" row and the summary excludes it from viable-lead stats.
+  synthetic?: boolean;
 }
 export interface EuMarketComp {
   id: string;
@@ -347,9 +352,22 @@ export const BRAND_CATALOG: Brand[] = [
           gen("iphone-x", "iPhone X", "2017", [
             ["iPhone X", "iPhone X"],
           ]),
-          gen("iphone-se", "iPhone SE", "2020", [
+          gen("iphone-se", "iPhone SE", "2016", [
             ["iPhone SE 2022 (3rd gen)", "iPhone SE 2022"],
             ["iPhone SE 2020 (2nd gen)", "iPhone SE 2020"],
+            ["iPhone SE 2016 (1st gen)", "iPhone SE 2016"],
+          ]),
+          gen("iphone-8", "iPhone 8 / 7 Series", "2016", [
+            ["iPhone 8", "iPhone 8"], ["iPhone 8 Plus", "iPhone 8 Plus"],
+            ["iPhone 7", "iPhone 7"], ["iPhone 7 Plus", "iPhone 7 Plus"],
+          ]),
+          gen("iphone-6s", "iPhone 6s / 6 Series", "2014", [
+            ["iPhone 6s", "iPhone 6s"], ["iPhone 6s Plus", "iPhone 6s Plus"],
+            ["iPhone 6", "iPhone 6"], ["iPhone 6 Plus", "iPhone 6 Plus"],
+          ]),
+          gen("iphone-5", "iPhone 5s / 5c / 5", "2012", [
+            ["iPhone 5s", "iPhone 5s"], ["iPhone 5c", "iPhone 5c"],
+            ["iPhone 5", "iPhone 5"],
           ]),
         ],
       },
@@ -1849,6 +1867,18 @@ const MODEL_RELEASE_DATES: Record<string, string> = {
   "iPhone X": "2017",
   "iPhone SE 2020": "2020",
   "iPhone SE 2022": "2022",
+  "iPhone SE 2016": "2016",
+  "iPhone 8": "2017",
+  "iPhone 8 Plus": "2017",
+  "iPhone 7": "2016",
+  "iPhone 7 Plus": "2016",
+  "iPhone 6s": "2015",
+  "iPhone 6s Plus": "2015",
+  "iPhone 6": "2014",
+  "iPhone 6 Plus": "2014",
+  "iPhone 5s": "2013",
+  "iPhone 5c": "2013",
+  "iPhone 5": "2012",
   // Samsung Galaxy A series (different years)
   "Samsung Galaxy A56": "2025",
   "Samsung Galaxy A55": "2024",

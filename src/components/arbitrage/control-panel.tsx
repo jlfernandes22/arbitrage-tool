@@ -662,7 +662,8 @@ export function ControlPanel({
             </div>
             <div className="flex flex-wrap gap-1.5">
               {[
-                { v: "all", l: "All" }, { v: "64", l: "64GB" }, { v: "128", l: "128GB" },
+                { v: "all", l: "All" }, { v: "16", l: "16GB" }, { v: "32", l: "32GB" },
+                { v: "64", l: "64GB" }, { v: "128", l: "128GB" },
                 { v: "256", l: "256GB" }, { v: "512", l: "512GB" }, { v: "1024", l: "1TB" },
               ].map((opt) => (
                 <button
