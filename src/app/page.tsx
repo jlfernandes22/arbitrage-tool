@@ -1218,9 +1218,14 @@ export default function Home() {
                 if (goofishPrices.length === 0) return 0;
                 const sorted = goofishPrices.map((p) => p.priceEur).sort((a, b) => a - b);
                 const mid = Math.floor(sorted.length / 2);
-                return sorted.length % 2 === 0
-                  ? Math.round((sorted[mid - 1] + sorted[mid]) / 2)
-                  : sorted[mid];
+                // Round to 2dp — acquisitionCostEur is a raw float and an
+                // odd-length median passed it through unrounded, rendering
+                // garbage like "€83.25049999999999" in the preview.
+                return Math.round(
+                  (sorted.length % 2 === 0
+                    ? (sorted[mid - 1] + sorted[mid]) / 2
+                    : sorted[mid]) * 100,
+                ) / 100;
               })();
               return (
                 <section className="space-y-3">
@@ -1382,20 +1387,23 @@ export default function Home() {
                         </div>
                       </div>
                       {/* Show potential margin if used median is known */}
-                      {usedMedian > 0 && goofishMedianEur > 0 && (
+                      {usedMedian > 0 && goofishMedianEur > 0 && (() => {
+                        const rawMargin = Math.round((usedMedian - goofishMedianEur) * 100) / 100;
+                        return (
                         <div className="mt-2 flex items-center gap-1.5 text-[11px]">
                           <TrendingUp className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
                           <span className="text-muted-foreground">
                             Potential margin: buy @ €{goofishMedianEur} (Goofish) → sell @ €{usedMedian} (used PT median) =
                           </span>
-                          <span className={`font-bold ${usedMedian - goofishMedianEur > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
-                            {usedMedian - goofishMedianEur > 0 ? "+" : ""}€{usedMedian - goofishMedianEur}
+                          <span className={`font-bold ${rawMargin > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
+                            {rawMargin > 0 ? "+" : ""}€{rawMargin}
                           </span>
                           <span className="text-muted-foreground">
                             (before import fees)
                           </span>
                         </div>
-                      )}
+                        );
+                      })()}
                     </div>
                   )}
                 </section>

@@ -1256,11 +1256,16 @@ export async function scrapeGoofish(
   }
   // Live fetch returned 0 listings — return EMPTY (NO mock data).
   // The user can use Manual Paste to provide real Goofish DOM HTML.
+  // `blocked` is set explicitly when the status indicates a Baxia/anti-bot
+  // block (vs a genuinely empty search), so the UI can show the right
+  // guidance per situation.
+  const blocked = /baxia|captcha|block|no results/i.test(status);
   return {
     listings: [],
     degraded: true,
     warning: `Live Playwright fetch to Goofish returned 0 listings. This may be due to a login wall, CAPTCHA, or anti-bot block from your IP. Use the Manual Paste feature to paste real Goofish DOM HTML from your browser.`,
     liveFetchStatus: status,
+    blocked,
   };
 }
 /**
