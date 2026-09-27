@@ -28,6 +28,7 @@ export interface ShortcutHandlers {
   onOpenActiveRow?: () => void;
   onCopyBlueprint?: () => void;
   onCopyMarkdown?: () => void;
+  onStarActive?: () => void;
   onExportCsv?: () => void;
   onToggleHelp?: () => void;
 }
@@ -105,6 +106,11 @@ export function useKeyboardShortcuts(handlers: ShortcutHandlers, enabled = true)
           e.preventDefault();
           handlers.onCopyMarkdown?.();
           break;
+        case "w":
+        case "W":
+          e.preventDefault();
+          handlers.onStarActive?.();
+          break;
         case "x":
         case "X":
           e.preventDefault();
@@ -132,6 +138,7 @@ export const SHORTCUTS_HELP: Array<{ keys: string; desc: string }> = [
   { keys: "o", desc: "Open detail dialog for active row" },
   { keys: "b", desc: "Copy blueprint for active row" },
   { keys: "m", desc: "Copy Markdown for active row" },
+  { keys: "w", desc: "Star / unstar active row → watchlist" },
   { keys: "x", desc: "Export CSV" },
   { keys: "?", desc: "Toggle this shortcuts dialog" },
   { keys: "Esc", desc: "Close dialog / blur search" },

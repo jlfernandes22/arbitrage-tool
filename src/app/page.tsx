@@ -122,6 +122,7 @@ import { ProfitChart } from "@/components/arbitrage/profit-chart";
 import { ProfitTrendChart } from "@/components/arbitrage/profit-trend-chart";
 import { ProfitHeatmap, extractFamily } from "@/components/arbitrage/profit-heatmap";
 import { ProductTrend } from "@/components/arbitrage/product-trend";
+import { WatchlistPanel } from "@/components/arbitrage/watchlist-panel";
 import { ReferenceEditor } from "@/components/arbitrage/reference-editor";
 import { exportListingsCsv, exportListingsJson } from "@/components/arbitrage/csv-export";
 import { useSavedQueries } from "@/hooks/use-saved-queries";
@@ -919,6 +920,7 @@ export default function Home() {
     onOpenActiveRow: () => resultsTableRef.current?.openActive(),
     onCopyBlueprint: () => resultsTableRef.current?.copyActiveBlueprint(),
     onCopyMarkdown: () => resultsTableRef.current?.copyActiveMarkdown(),
+    onStarActive: () => resultsTableRef.current?.starActive(),
     onExportCsv: () => {
       const filtered = getFilteredListings();
       // Capture `result` locally so TS can prove it's non-null inside the
@@ -1981,6 +1983,10 @@ export default function Home() {
                 onToggleHidden={() => setShowHidden((s) => !s)}
                 cardFilter={cardFilter}
                 heatmapFilter={heatmapCell ? (() => { const [family, condition] = heatmapCell.split("__"); return { family, condition }; })() : null}
+                onClearFilters={() => {
+                  setCardFilter(null);
+                  setHeatmapCell(null);
+                }}
               />
             </section>
           </>
@@ -2033,6 +2039,11 @@ export default function Home() {
             </div>
           </section>
         )}
+        {/* ── Listing Watchlist ─────────────────────────────────────
+            Persistent cross-scan shortlist of starred Goofish listings.
+            Renders ALWAYS (scan or no scan) — it's the "deals I'm circling"
+            memory: latest known profit, Δ-since-star, per-item notes. */}
+        <WatchlistPanel listings={safeListings} query={result?.query} />
         {/* ── Product Profit Trend ──────────────────────────────────
             Shows profit trend across past scans for a specific product.
             The user can search for any product and see how its median

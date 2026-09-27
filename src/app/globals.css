@@ -137,6 +137,27 @@
     animation: none;
   }
 }
+/* Star-pop: quick scale bounce when a listing is starred into the watchlist
+   (applied on the Star icon when the watched state turns on). */
+@keyframes star-pop {
+  0% {
+    transform: scale(0.4) rotate(-18deg);
+  }
+  60% {
+    transform: scale(1.3) rotate(6deg);
+  }
+  100% {
+    transform: scale(1) rotate(0deg);
+  }
+}
+.star-pop {
+  animation: star-pop 0.32s cubic-bezier(0.2, 0.7, 0.3, 1.25) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .star-pop {
+    animation: none;
+  }
+}
 
 /* Slim, theme-aware scrollbars for the data-dense panels (tables, console,
    history list) — default chrome scrollbars visually fight the shadcn UI. */

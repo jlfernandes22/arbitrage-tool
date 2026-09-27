@@ -824,8 +824,30 @@ async function scrapeGoofishLive(
       .map((r, i) => {
         const priceCny = Math.round(parseFloat(r.priceText.replace(/,/g, "")));
         const normalized = normalizeListing(r.title, r.description);
+        // ── Stable cross-scan identity ──────────────────────────────
+        // The REAL Goofish item id lives in the listing URL
+        // (…/item?id=<numeric id>). Positional ids ("gf-live-3") change
+        // every scan — a listing that was 3rd today can be 7th tomorrow —
+        // which silently corrupts every cross-scan feature keyed on
+        // listing.id (profit trend sparklines, profit-move alerts, the
+        // market-moved digest, and the watchlist: position-matched
+        // "deltas" were actually comparing DIFFERENT physical ads).
+        // Prefer the real item id; keep the positional id ONLY as a
+        // fallback when the href is missing/malformed. Scraping logic
+        // (extraction, title↔price pairing) is untouched.
+        const stableId = (() => {
+          if (r.href) {
+            try {
+              const real = new URL(r.href, "https://www.goofish.com").searchParams.get("id");
+              if (real && /^[0-9A-Za-z_-]{6,}$/.test(real)) return `gf-${real}`;
+            } catch {
+              // malformed URL — fall through to positional id
+            }
+          }
+          return `gf-live-${i}`;
+        })();
         return {
-          id: `gf-live-${i}`,
+          id: stableId,
           title: r.title,
           priceCny,
           description: r.description,

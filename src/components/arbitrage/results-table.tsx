@@ -23,7 +23,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Columns3 } from "lucide-react";
+import { Columns3, Star } from "lucide-react";
 import {
   ArrowUpDown,
   ArrowUp,
@@ -36,6 +36,8 @@ import {
   FileText,
   TrendingDown,
   TrendingUp,
+  SearchX,
+  FilterX,
 } from "lucide-react";
 import type { ListingTrendResponse } from "@/lib/listing-trend";
 import {
@@ -50,6 +52,7 @@ import { displayTitle } from "@/lib/engine/normalizer";
 import { getConditionFlagClasses } from "@/lib/engine/condition-flags";
 import { ListingDetailDialog } from "./listing-detail";
 import { toast } from "sonner";
+import { toggleWatch, useWatchlist } from "@/lib/watchlist";
 type SortKey =
   | "product"
   | "costBaseEur"
@@ -58,6 +61,39 @@ type SortKey =
   | "trend"
   | "margin"
   | "risk";
+
+// ── Sort persistence (per browser session) ────────────────────────────
+// sessionStorage: survives navigation/reloads within the tab, resets on a
+// fresh session — matching the "per session" UX request. Corrupted or
+// unknown values silently fall back to the defaults (netProfit desc).
+const SORT_STORAGE_KEY = "arbitrage_sort_v1";
+function readPersistedSort(): { key: SortKey; dir: "asc" | "desc" } {
+  const DEFAULTS = { key: "netProfit" as SortKey, dir: "desc" as const };
+  if (typeof window === "undefined") return DEFAULTS;
+  try {
+    const raw = window.sessionStorage.getItem(SORT_STORAGE_KEY);
+    if (!raw) return DEFAULTS;
+    const parsed = JSON.parse(raw) as { key?: string; dir?: string };
+    const key = parsed.key as SortKey;
+    const dir = parsed.dir as "asc" | "desc";
+    const validKeys: SortKey[] = [
+      "product", "costBaseEur", "euBaseline", "netProfit", "trend", "margin", "risk",
+    ];
+    return {
+      key: validKeys.includes(key) ? key : DEFAULTS.key,
+      dir: dir === "asc" || dir === "desc" ? dir : DEFAULTS.dir,
+    };
+  } catch {
+    return DEFAULTS;
+  }
+}
+function persistSort(key: SortKey, dir: "asc" | "desc") {
+  try {
+    window.sessionStorage.setItem(SORT_STORAGE_KEY, JSON.stringify({ key, dir }));
+  } catch {
+    // Private mode / quota — sort persistence is a nicety, not critical.
+  }
+}
 
 // ── Listing profit-trend cache ──────────────────────────────────────────────
 // One fetch per scan per session (mirrors the comp-trend cache in the
@@ -141,15 +177,19 @@ interface ResultsTableProps {
   // External filter from clicking a heatmap cell: {family, condition}.
   // Applied on top of cardFilter. null = no heatmap filter.
   heatmapFilter?: { family: string; condition: string } | null;
+  // Clears the page-level card/heatmap filters (shown in the empty state so
+  // "why is this table blank?" always has a one-click fix).
+  onClearFilters?: () => void;
 }
 // Imperative API exposed via ref so the parent (page.tsx) can drive row
-// navigation from keyboard shortcuts (j/k/o/b/m).
+// navigation from keyboard shortcuts (j/k/o/b/m/w).
 export interface ResultsTableHandle {
   nextRow: () => void;
   prevRow: () => void;
   openActive: () => void;
   copyActiveBlueprint: () => void;
   copyActiveMarkdown: () => void;
+  starActive: () => void;
 }
 export const ResultsTable = forwardRef<ResultsTableHandle, ResultsTableProps>(function ResultsTable({
   listings: rawListings,
@@ -158,10 +198,13 @@ export const ResultsTable = forwardRef<ResultsTableHandle, ResultsTableProps>(fu
   onToggleHidden,
   cardFilter = null,
   heatmapFilter = null,
+  onClearFilters,
 }, ref) {
   const listings = Array.isArray(rawListings) ? rawListings : [];
-  const [sortKey, setSortKey] = useState<SortKey>("netProfit");
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  // Sort choice persists for the browser session (sessionStorage) — users
+  // comparing scans shouldn't re-pick "Trend ↓" after every navigation.
+  const [sortKey, setSortKey] = useState<SortKey>(() => readPersistedSort().key);
+  const [sortDir, setSortDir] = useState<"asc" | "desc">(() => readPersistedSort().dir);
   const [selected, setSelected] = useState<EvaluatedListing | null>(null);
   const [activeIdx, setActiveIdx] = useState<number>(-1);
   const [imgErrors, setImgErrors] = useState<Record<string, boolean>>({});
@@ -233,6 +276,31 @@ export const ResultsTable = forwardRef<ResultsTableHandle, ResultsTableProps>(fu
     });
   };
   const isColVisible = (col: string) => !hiddenColumns.has(col);
+  // Watchlist — shared external store (same instance the WatchlistPanel
+  // subscribes to), so star buttons here and the panel never disagree.
+  const { isWatched: isWatchedFn } = useWatchlist();
+  const watch = (l: EvaluatedListing) => {
+    const listing = l?.listing;
+    if (!listing || listing.synthetic) return;
+    const outcome = toggleWatch({
+      id: listing.id,
+      title: listing.normalized?.standardKey ?? displayTitle(listing.title),
+      rawTitle: listing.title,
+      query: listing.normalized?.standardKey ?? listing.title,
+      url: listing.href ?? null,
+      priceCny: listing.priceCny,
+      netProfitEur: l.profit?.netProfitEur ?? 0,
+      marginPct: l.profit?.marginPct ?? 0,
+      riskScore: l.scam?.riskScore ?? 0,
+    });
+    if (outcome === "added") {
+      toast.success("Starred — added to watchlist", {
+        description: `${listing.normalized?.standardKey ?? displayTitle(listing.title)} · ${eurPrecise(l.profit?.netProfitEur ?? 0)} net now`,
+      });
+    } else {
+      toast("Removed from watchlist");
+    }
+  };
   // Apply the card filter on top of the showHidden toggle.
   // - "all": show everything (forces showHidden behavior for this filter)
   // - "viable": only non-hidden listings
@@ -297,10 +365,15 @@ export const ResultsTable = forwardRef<ResultsTableHandle, ResultsTableProps>(fu
   }, [visible, sortKey, sortDir, listingTrend]);
   const toggleSort = (key: SortKey) => {
     if (sortKey === key) {
-      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+      setSortDir((d) => {
+        const next = d === "asc" ? "desc" : "asc";
+        persistSort(key, next);
+        return next;
+      });
     } else {
       setSortKey(key);
       setSortDir("desc");
+      persistSort(key, "desc");
     }
   };
   // ── Pagination ──────────────────────────────────────────────
@@ -454,7 +527,15 @@ export const ResultsTable = forwardRef<ResultsTableHandle, ResultsTableProps>(fu
         copyMarkdown(sorted[activeIdx]);
       }
     },
-  }), [sorted, activeIdx, effectivePage]);
+    starActive: () => {
+      if (activeIdx >= 0 && activeIdx < sorted.length) {
+        watch(sorted[activeIdx]);
+      } else if (sorted.length > 0) {
+        watch(sorted[0]);
+        setActiveIdx(0);
+      }
+    },
+  }), [sorted, activeIdx, effectivePage, listings, showHidden, cardFilter, heatmapFilter]);
   if (listings.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center rounded-lg border border-dashed py-16 text-center">
@@ -551,6 +632,78 @@ export const ResultsTable = forwardRef<ResultsTableHandle, ResultsTableProps>(fu
               </TableRow>
             </TableHeader>
             <TableBody>
+              {/* Empty state — the scan HAS listings but the current view
+                  shows none (all filtered by profit threshold / scam rules /
+                  card or heatmap filters). Never render a bare header with an
+                  empty body: explain WHY and offer the one-click fixes. */}
+              {sorted.length === 0 && (() => {
+                const bestNet = listings.reduce(
+                  (m, l) => Math.max(m, l?.profit?.netProfitEur ?? -Infinity),
+                  -Infinity,
+                );
+                const reason = heatmapFilter
+                  ? "no listings match the selected heatmap cell"
+                  : cardFilter === "scam"
+                    ? "the table is filtered to scam-hidden listings only"
+                    : cardFilter === "profit"
+                      ? "the table is filtered to profit-hidden listings only"
+                      : cardFilter === "viable"
+                        ? "the viable-only filter is active"
+                        : showHidden
+                          ? "all listings are shown but none survived the current filters"
+                          : `none met your profit/risk thresholds (best net: ${bestNet > -Infinity ? eurPrecise(bestNet) : "—"})`;
+                const colCount =
+                  2 +
+                  (isColVisible("costBaseEur") ? 1 : 0) +
+                  (isColVisible("euBaseline") ? 1 : 0) +
+                  (isColVisible("netProfit") ? 1 : 0) +
+                  (hasTrendData && isColVisible("trend") ? 1 : 0) +
+                  (isColVisible("margin") ? 1 : 0) +
+                  (isColVisible("risk") ? 1 : 0) +
+                  1; // action
+                return (
+                  <TableRow className="row-enter hover:bg-transparent">
+                    <TableCell colSpan={colCount} className="p-0">
+                      <div className="flex flex-col items-center justify-center gap-2 border border-dashed border-muted-foreground/20 bg-gradient-to-b from-muted/30 to-transparent px-4 py-10 text-center">
+                        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-slate-400/80 to-slate-600/80 text-white shadow-sm">
+                          <SearchX className="h-5 w-5" />
+                        </div>
+                        <p className="text-xs font-semibold">
+                          No listings to show — {reason}
+                        </p>
+                        <p className="max-w-md text-[11px] leading-relaxed text-muted-foreground">
+                          This scan evaluated {listings.length} Goofish listing{listings.length === 1 ? "" : "s"}. Loosen the
+                          filters below, or toggle "Show filtered-out" to inspect every row with its full margin math.
+                        </p>
+                        <div className="mt-1 flex flex-wrap items-center justify-center gap-2">
+                          {!showHidden && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-7 gap-1 text-xs"
+                              onClick={onToggleHidden}
+                            >
+                              <Eye className="h-3.5 w-3.5" />
+                              Show filtered-out ({listings.length})
+                            </Button>
+                          )}
+                          {(cardFilter || heatmapFilter) && onClearFilters && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-7 gap-1 text-xs"
+                              onClick={onClearFilters}
+                            >
+                              <FilterX className="h-3.5 w-3.5" />
+                              Clear filters
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                );
+              })()}
               {paged.map((l, idx) => {
                 // Defensive: guard against undefined listing (data shape
                 // mismatch after re-evaluate or cache deserialization).
@@ -577,7 +730,7 @@ export const ResultsTable = forwardRef<ResultsTableHandle, ResultsTableProps>(fu
                 return (
                   <TableRow
                     key={listing.id}
-                    className={`row-enter cursor-pointer transition-colors hover:bg-muted/50 ${
+                    className={`group/row row-enter cursor-pointer transition-colors hover:bg-muted/50 ${
                       // Zebra striping — alternating rows make wide tabular
                       // data (7+ columns) much easier to scan across.
                       (pageStart + idx) % 2 === 1 ? "bg-muted/20" : ""
@@ -1017,6 +1170,28 @@ export const ResultsTable = forwardRef<ResultsTableHandle, ResultsTableProps>(fu
                     )}
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-1">
+                        {/* Watchlist star — the cross-scan shortlist. Filled
+                            amber when starred; unstarred rows reveal it on
+                            hover (keyboard "w" stars the active row too). */}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className={`h-7 w-7 p-0 transition-all ${
+                            isWatchedFn(listing.id)
+                              ? "text-amber-500 hover:text-amber-600 dark:text-amber-400"
+                              : "text-muted-foreground/40 opacity-0 hover:text-amber-500 group-hover/row:opacity-100 focus-visible:opacity-100 dark:hover:text-amber-400"
+                          } ${isActive ? "opacity-100" : ""}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            watch(l);
+                          }}
+                          aria-label={isWatchedFn(listing.id) ? "Remove from watchlist" : "Add to watchlist"}
+                          title={isWatchedFn(listing.id) ? "Unstar (in watchlist)" : "Star → watchlist (w)"}
+                        >
+                          <Star
+                            className={`h-3.5 w-3.5 ${isWatchedFn(listing.id) ? "star-pop fill-amber-400 text-amber-500 dark:fill-amber-400" : ""}`}
+                          />
+                        </Button>
                         <Button
                           variant="ghost"
                           size="sm"

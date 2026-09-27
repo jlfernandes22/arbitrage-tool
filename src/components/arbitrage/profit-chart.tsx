@@ -82,6 +82,11 @@ export function ProfitChart({ listings }: ProfitChartProps) {
   if (safe.length === 0) {
     return null;
   }
+  // Label density: rendering every tick with 50+ bars produces overlapping,
+  // unreadable axis text (QA finding). Cap at ~14 visible labels — enough
+  // to orient, never enough to collide. The tooltip always shows the full
+  // product name regardless.
+  const tickInterval = data.length > 16 ? Math.ceil(data.length / 14) : 0;
   return (
     <Card>
       <CardHeader className="pb-2">
@@ -108,7 +113,7 @@ export function ProfitChart({ listings }: ProfitChartProps) {
               angle={-30}
               textAnchor="end"
               height={50}
-              interval={0}
+              interval={tickInterval}
             />
             <YAxis
               tick={{ fontSize: 10, fill: theme.axis }}
