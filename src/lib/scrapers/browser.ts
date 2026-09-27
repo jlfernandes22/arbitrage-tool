@@ -151,6 +151,20 @@ export async function closeBrowser(): Promise<void> {
 }
 
 /**
+ * Watchdog escape hatch: detach + close the shared browser WITHOUT waiting.
+ * Used by the orchestrator when the OLX scraper exceeds its watchdog budget —
+ * closing the browser rejects all of the hung scrape's pending Playwright
+ * operations, so its promise settles and its own finally-cleanup runs
+ * (instead of abandoning a live browser). The next getBrowser() call simply
+ * relaunches a fresh instance.
+ */
+export function forceCloseSharedBrowser(): void {
+  const b = browserInstance;
+  browserInstance = null;
+  if (b) void b.close().catch(() => {});
+}
+
+/**
  * Close the browser on process termination signals so no zombie Chromium
  * processes are left behind after Ctrl+C / SIGTERM. The pending
  * browser.close() keeps the event loop alive until Chromium has exited.

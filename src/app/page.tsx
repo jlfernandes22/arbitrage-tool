@@ -1825,6 +1825,7 @@ export default function Home() {
               <ResultsTable
                 ref={resultsTableRef}
                 listings={safeListings}
+                taskId={result.taskId}
                 showHidden={showHidden}
                 onToggleHidden={() => setShowHidden((s) => !s)}
                 cardFilter={cardFilter}

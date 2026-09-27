@@ -56,6 +56,9 @@ type SortKey =
   | "risk";
 interface ResultsTableProps {
   listings: EvaluatedListing[];
+  // Scan id — enables the comp price-watch (trend deltas vs previous scans
+  // of the same query) in the listing-detail dialog's comps table.
+  taskId?: string;
   showHidden: boolean;
   onToggleHidden: () => void;
   // External filter from clicking summary cards. null = no filter.
@@ -75,6 +78,7 @@ export interface ResultsTableHandle {
 }
 export const ResultsTable = forwardRef<ResultsTableHandle, ResultsTableProps>(function ResultsTable({
   listings: rawListings,
+  taskId,
   showHidden,
   onToggleHidden,
   cardFilter = null,
@@ -884,6 +888,7 @@ export const ResultsTable = forwardRef<ResultsTableHandle, ResultsTableProps>(fu
         listing={selected}
         open={!!selected}
         onOpenChange={(o) => !o && setSelected(null)}
+        taskId={taskId}
       />
     </>
     </TooltipProvider>

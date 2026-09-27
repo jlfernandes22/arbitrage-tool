@@ -425,6 +425,7 @@ async function scrapeAmazonLive(
       "--disable-dev-shm-usage",
     ],
   });
+  activeBrowser = freshBrowser;
   // ── Overall watchdog ──────────────────────────────────────────────────
   // Every goto/evaluate below has a timeout EXCEPT a few page.evaluate
   // calls (cookie banner, service-worker kill, DOM reads). A hung renderer
@@ -667,8 +668,20 @@ async function scrapeAmazonLive(
     const msg = e instanceof Error ? e.message : String(e);
     return { comps: [], status: `LIVE FETCH FAILED: ${msg}` };
   } finally {
+    activeBrowser = null;
     clearTimeout(watchdog);
   }
+}
+
+// In-flight browser reference for orchestrator watchdog cancellation (fires
+// at 540s, before this scraper's own 600s internal watchdog). Force-closing
+// rejects the hung scrape's pending Playwright ops so its promise settles
+// and cleanup runs — no abandoned live browser.
+let activeBrowser: import("playwright").Browser | null = null;
+export function forceCloseAmazonBrowser(): void {
+  const b = activeBrowser;
+  activeBrowser = null;
+  if (b) void b.close().catch(() => {});
 }
 
 export async function scrapeAmazon(

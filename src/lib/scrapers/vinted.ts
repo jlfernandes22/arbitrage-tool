@@ -82,7 +82,7 @@ async function launchVintedBrowser(): Promise<import("playwright").Browser> {
   const { chromium } = await import("playwright");
   // Preferred: full engine (new headless) — much harder to fingerprint.
   try {
-    return await chromium.launch({
+    const b = await chromium.launch({
       headless: true,
       channel: "chromium",
       args: [
@@ -92,9 +92,11 @@ async function launchVintedBrowser(): Promise<import("playwright").Browser> {
         "--disable-dev-shm-usage",
       ],
     });
+    activeBrowser = b;
+    return b;
   } catch {
     // Full-engine binary missing — fall back to the default headless shell.
-    return await chromium.launch({
+    const b = await chromium.launch({
       headless: true,
       args: [
         "--disable-blink-features=AutomationControlled",
@@ -103,7 +105,21 @@ async function launchVintedBrowser(): Promise<import("playwright").Browser> {
         "--disable-dev-shm-usage",
       ],
     });
+    activeBrowser = b;
+    return b;
   }
+}
+
+// In-flight browser reference for watchdog cancellation (see orchestrator's
+// withScrapeWatchdog onTimeout): when the scrape exceeds its budget the
+// orchestrator force-closes this browser, which rejects all pending Playwright
+// ops inside the hung scrape — its promise settles and its own finally-cleanup
+// runs, so no live browser is abandoned.
+let activeBrowser: import("playwright").Browser | null = null;
+export function forceCloseVintedBrowser(): void {
+  const b = activeBrowser;
+  activeBrowser = null;
+  if (b) void b.close().catch(() => {});
 }
 // Selectors that prove the real catalog rendered (challenge cleared).
 const CATALOG_SELECTORS = [
@@ -322,6 +338,7 @@ async function scrapeVintedLive(euQuery: string, maxPages: number): Promise<{ co
     const msg = e instanceof Error ? e.message : String(e);
     return { comps: [], status: `LIVE FETCH FAILED: ${msg}`, blocked: false };
   } finally {
+    activeBrowser = null;
     await browser.close().catch(() => {});
   }
 }

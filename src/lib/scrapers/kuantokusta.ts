@@ -40,7 +40,7 @@ function buildKuantokustaSearchUrl(query: string, page: number = 1): string {
 async function launchKkBrowser(): Promise<import("playwright").Browser> {
   const { chromium } = await import("playwright");
   try {
-    return await chromium.launch({
+    const b = await chromium.launch({
       headless: true,
       channel: "chromium",
       args: [
@@ -50,8 +50,10 @@ async function launchKkBrowser(): Promise<import("playwright").Browser> {
         "--disable-dev-shm-usage",
       ],
     });
+    activeBrowser = b;
+    return b;
   } catch {
-    return await chromium.launch({
+    const b = await chromium.launch({
       headless: true,
       args: [
         "--disable-blink-features=AutomationControlled",
@@ -60,7 +62,20 @@ async function launchKkBrowser(): Promise<import("playwright").Browser> {
         "--disable-dev-shm-usage",
       ],
     });
+    activeBrowser = b;
+    return b;
   }
+}
+
+// In-flight browser reference for watchdog cancellation (see orchestrator's
+// withScrapeWatchdog onTimeout). Force-closing rejects the hung scrape's
+// pending Playwright ops so its promise settles and cleanup runs — no
+// abandoned live browsers.
+let activeBrowser: import("playwright").Browser | null = null;
+export function forceCloseKkBrowser(): void {
+  const b = activeBrowser;
+  activeBrowser = null;
+  if (b) void b.close().catch(() => {});
 }
 
 /**
@@ -440,6 +455,7 @@ async function scrapeKuantokustaLive(
     const msg = e instanceof Error ? e.message : String(e);
     return { comps: [], status: `LIVE FETCH FAILED: ${msg}`, blocked: false };
   } finally {
+    activeBrowser = null;
     await browser.close().catch(() => {});
   }
 }

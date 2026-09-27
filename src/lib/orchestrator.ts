@@ -34,7 +34,19 @@ import { scrapeKuantokusta } from "@/lib/scrapers/kuantokusta";
 import { scrapeAmazon } from "@/lib/scrapers/amazon";
 import { getReferencePrices } from "@/lib/reference-prices";
 import { getTask, setTask, updateTask, appendLog, isCancelRequested, type TaskState } from "@/lib/task-store";
+import {
+  noteScanActivity,
+  countLiveBrowserChildren,
+  startBrowserJanitor,
+} from "@/lib/browser-janitor";
+import { forceCloseSharedBrowser } from "@/lib/scrapers/browser";
+import { forceCloseVintedBrowser } from "@/lib/scrapers/vinted";
+import { forceCloseKkBrowser } from "@/lib/scrapers/kuantokusta";
+import { forceCloseAmazonBrowser } from "@/lib/scrapers/amazon";
 import { ensureArray } from "@/lib/utils";
+
+// Start the periodic leak reaper (idempotent; no-op interval when idle).
+startBrowserJanitor();
 export interface SubmitInput {
   query: string;
   category: Category;
@@ -173,6 +185,11 @@ function withScrapeWatchdog<T>(
   promise: Promise<T>,
   budgetMs: number,
   siteLabel: string,
+  // Optional cancellation hook — force-closes the scraper's in-flight browser
+  // so the hung scrape's pending Playwright ops REJECT and its own
+  // finally-cleanup runs (instead of abandoning a live browser until process
+  // exit). Goofish deliberately has no hook — its core lifecycle is protected.
+  onTimeout?: () => void,
 ): Promise<T | typeof SCRAPE_TIMEOUT> {
   return Promise.race([
     promise,
@@ -181,10 +198,33 @@ function withScrapeWatchdog<T>(
         console.warn(
           `[Orchestrator] ${siteLabel} exceeded its ${Math.round(budgetMs / 1000)}s budget — reporting timeout (scraper may still be hung in the background)`,
         );
+        try {
+          onTimeout?.();
+        } catch {
+          // cancellation is best-effort
+        }
         resolve(SCRAPE_TIMEOUT);
       }, budgetMs);
     }),
   ]);
+}
+
+/**
+ * End-of-scan browser audit — makes leaks VISIBLE in the server log instead
+ * of silently accumulating chromium processes. The janitor reaps leftovers;
+ * this tells us how many were alive the moment the scan ended.
+ */
+function logBrowserAudit(taskId: string): void {
+  try {
+    const n = countLiveBrowserChildren();
+    if (n > 0) {
+      console.warn(
+        `[Orchestrator] Browser audit: ${n} playwright browser child(ren) still alive after scan ${taskId} — the janitor will reap them if they outlive the idle grace period`,
+      );
+    }
+  } catch {
+    // audit is best-effort
+  }
 }
 
 export async function runPipeline(taskId: string): Promise<void> {
@@ -195,6 +235,7 @@ export async function runPipeline(taskId: string): Promise<void> {
 async function runPipelineInner(taskId: string, gen: number): Promise<void> {
   const state = getTask(taskId);
   if (!state) return;
+  noteScanActivity();
   const cfg = resolveConfig(state.configOverrides);
   const patch = (p: Partial<TaskState>) => updateTask(taskId, p);
   // Per-site progress interval handle. Declared OUTSIDE the try block so the
@@ -526,10 +567,10 @@ async function runPipelineInner(taskId: string, gen: number): Promise<void> {
     patch({ progress: 10, step: stepLabel });
     const [goofishRaw, olxRaw, vintedRaw, kkRaw, amazonRaw, forex] = await Promise.all([
       withScrapeWatchdog(goofishPromise, 660_000, "Goofish"),
-      withScrapeWatchdog(olxPromise, 540_000, "OLX"),
-      withScrapeWatchdog(vintedPromise, 540_000, "Vinted"),
-      withScrapeWatchdog(kkPromise, 540_000, "KuantoKusta"),
-      withScrapeWatchdog(amazonPromise, 540_000, "Amazon"),
+      withScrapeWatchdog(olxPromise, 540_000, "OLX", forceCloseSharedBrowser),
+      withScrapeWatchdog(vintedPromise, 540_000, "Vinted", forceCloseVintedBrowser),
+      withScrapeWatchdog(kkPromise, 540_000, "KuantoKusta", forceCloseKkBrowser),
+      withScrapeWatchdog(amazonPromise, 540_000, "Amazon", forceCloseAmazonBrowser),
       forexPromise,
     ]);
     // Stop the per-site progress updates — all scrapers are done
@@ -734,6 +775,8 @@ async function runPipelineInner(taskId: string, gen: number): Promise<void> {
     setTask(taskId, finalState);
     appendLog(taskId, "SUCCESS", `Pipeline complete — ${summary.shown}/${summary.total} viable, best profit €${Math.round(summary.bestProfitEur)}, avg margin ${summary.avgMarginPct}%`);
     await persistTask(taskId, finalState);
+    noteScanActivity();
+    logBrowserAudit(taskId);
   } catch (err) {
     stopProgress();
     // Superseded run — don't stamp "Pipeline error" over a newer run's state.
@@ -751,6 +794,8 @@ async function runPipelineInner(taskId: string, gen: number): Promise<void> {
     };
     setTask(taskId, errState);
     await persistTask(taskId, errState);
+    noteScanActivity();
+    logBrowserAudit(taskId);
   }
 }
 /**

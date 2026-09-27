@@ -7,7 +7,7 @@
 // As of Phase 3, this store is a *write-through cache for active/running
 // tasks only*. The history list (`/api/tasks/list`) reads from the Prisma
 // SQLite `Task` table as the source of truth, so history survives restarts.
-import type { TaskState, TaskResult, AppConfig, LogEntry, LogLevel } from "@/lib/engine/types";
+import type { TaskState, TaskResult, AppConfig, LogEntry, LogLevel, TaskStatus } from "@/lib/engine/types";
 const globalForTasks = globalThis as unknown as {
   __arbitrageTaskStore: Map<string, TaskState> | undefined;
 };
@@ -41,6 +41,25 @@ function evictCompletedTasks(): void {
     store.delete(id);
   }
 }
+const ACTIVE_STATUSES = new Set<TaskStatus>([
+  "pending",
+  "scraping_goofish",
+  "matching_eu",
+  "calculating",
+]);
+
+/**
+ * True while any in-memory task is mid-pipeline. Used by the browser janitor
+ * to decide whether leftover playwright children are leaks (no scan active)
+ * or legitimately winding-down scrapers.
+ */
+export function hasActiveScan(): boolean {
+  for (const task of store.values()) {
+    if (ACTIVE_STATUSES.has(task.status)) return true;
+  }
+  return false;
+}
+
 export function getTask(id: string): TaskState | undefined {
   return store.get(id);
 }

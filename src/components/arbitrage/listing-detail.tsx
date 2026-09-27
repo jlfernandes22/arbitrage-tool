@@ -30,6 +30,7 @@ import {
   ExternalLink,
   Languages,
   Loader2,
+  TrendingUp,
   RefreshCw,
 } from "lucide-react";
 import {
@@ -45,6 +46,7 @@ import { displayTitle as cleanDisplayTitle, translateConditionRaw } from "@/lib/
 import { getConditionFlagClasses } from "@/lib/engine/condition-flags";
 import { ensureArray } from "@/lib/utils";
 import { WhatIfSimulator } from "./what-if-simulator";
+import { compTrendKey, type CompTrendResponse } from "@/lib/comp-trend";
 
 // Normalize image URLs — ensures protocol-relative URLs (//img.alicdn.com/...)
 // get the https: prefix so they load correctly in all browsers.
@@ -61,6 +63,9 @@ interface ListingDetailDialogProps {
   listing: EvaluatedListing | null;
   open: boolean;
   onOpenChange: (o: boolean) => void;
+  // Scan id — enables the comp price-watch trend column (deltas vs previous
+  // scans of the same query). Absent for cached/legacy callers.
+  taskId?: string;
 }
 
 interface Translation {
@@ -87,19 +92,67 @@ function cacheTranslation(key: string, value: Translation): void {
   }
 }
 
+// Module-level cache: taskId → comp-trend. One fetch per scan per session —
+// opening 20 listings in a scan reuses the same deltas. Bounded like the
+// translation cache.
+const COMP_TREND_CACHE_MAX = 30;
+const compTrendCache = new Map<string, CompTrendResponse>();
+function cacheCompTrend(taskId: string, data: CompTrendResponse): void {
+  compTrendCache.delete(taskId);
+  compTrendCache.set(taskId, data);
+  while (compTrendCache.size > COMP_TREND_CACHE_MAX) {
+    const oldestKey = compTrendCache.keys().next().value;
+    if (oldestKey === undefined) break;
+    compTrendCache.delete(oldestKey);
+  }
+}
+
 export function ListingDetailDialog({
   listing,
   open,
   onOpenChange,
+  taskId,
 }: ListingDetailDialogProps) {
   const [translation, setTranslation] = useState<Translation | null>(null);
   const [translating, setTranslating] = useState(false);
   const [translateError, setTranslateError] = useState<string | null>(null);
+  // Comp price-watch: per-comp deltas vs previous scans of the same query.
+  const [compTrend, setCompTrend] = useState<CompTrendResponse | null>(null);
+  const [compTrendLoading, setCompTrendLoading] = useState(false);
   // Track which listing id the current translation belongs to so we don't
   // show a stale translation when the user opens a different listing.
   const translatedIdRef = useRef<string | null>(null);
   // Currently selected image in the gallery (resets when listing changes)
   const [selectedImage, setSelectedImage] = useState(0);
+
+  // ── Comp price-watch fetch (one per scan per session, cached) ──
+  useEffect(() => {
+    if (!open || !taskId) return;
+    const cached = compTrendCache.get(taskId);
+    if (cached) {
+      setCompTrend(cached);
+      return;
+    }
+    let stale = false;
+    setCompTrendLoading(true);
+    fetch(`/api/tasks/comp-trend/${taskId}`, { cache: "no-store" })
+      .then(async (r) => {
+        if (!r.ok) throw new Error(`comp-trend ${r.status}`);
+        return (await r.json()) as CompTrendResponse;
+      })
+      .then((data) => {
+        if (stale) return;
+        cacheCompTrend(taskId, data);
+        setCompTrend(data);
+        setCompTrendLoading(false);
+      })
+      .catch(() => {
+        if (!stale) setCompTrendLoading(false); // trend stays null — column hidden
+      });
+    return () => {
+      stale = true;
+    };
+  }, [open, taskId]);
 
   const l = listing?.listing;
   const scam = listing?.scam;
@@ -274,8 +327,12 @@ export function ListingDetailDialog({
             tables instead of clipping content. min-w-0 prevents flex overflow. */}
         <ScrollArea className="min-h-0 flex-1 overflow-auto px-4 py-4 sm:px-6">
           <div className="min-w-0 space-y-4">
-            {/* Price Summary — asking price + key metrics at a glance */}
-            <section className="min-w-0 rounded-lg border bg-gradient-to-br from-muted/50 to-muted/20 p-4">
+            {/* Price Summary — asking price + key metrics at a glance.
+                overflow-hidden caps the section's min-content: the big
+                tabular figures (text-2xl CNY price) otherwise set a ~348px
+                min-content that re-widens the whole dialog on 390px screens
+                via the ScrollArea's display:table wrapper. */}
+            <section className="min-w-0 overflow-hidden rounded-lg border bg-gradient-to-br from-muted/50 to-muted/20 p-4">
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                 {/* Asking Price (CNY) — the seller's original asking price */}
                 <div className="col-span-2 sm:col-span-1">
@@ -749,9 +806,40 @@ export function ListingDetailDialog({
             </section>
             {/* EU comps */}
             <section className="min-w-0 rounded-lg border bg-muted/30 p-3">
-              <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                European Market Comps ({euComps.length})
-              </h4>
+              <div className="mb-2 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+                <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  European Market Comps ({euComps.length})
+                </h4>
+                {/* Price-watch summary: how many tracked items moved vs the
+                    previous scan of this query. Up = market strengthening
+                    (better resale); down = softening. */}
+                {compTrend && compTrend.matched > 0 && (
+                  (() => {
+                    const ds = Object.values(compTrend.deltas);
+                    const ups = ds.filter((d) => d.deltaEur > 0).length;
+                    const downs = ds.length - ups;
+                    const biggestDrop = Math.min(0, ...ds.map((d) => d.deltaEur));
+                    return (
+                      <span
+                        className="flex items-center gap-1 text-[10px] font-medium tabular-nums text-muted-foreground"
+                        title={`Compared against ${compTrend.scansCompared} earlier scan(s) of "${compTrend.comparedAgainst ? new Date(compTrend.comparedAgainst.at).toLocaleString() : "unknown date"}"`}
+                      >
+                        <TrendingUp className="h-3 w-3" />
+                        price-watch:{" "}
+                        <span className="text-emerald-600 dark:text-emerald-400">{ups} up</span>
+                        {" · "}
+                        <span className={downs > 0 ? "text-rose-600 dark:text-rose-400" : ""}>
+                          {downs} down
+                        </span>
+                        {downs > 0 && biggestDrop < 0 && (
+                          <span>· biggest −{eur(Math.abs(biggestDrop))}</span>
+                        )}
+                        {compTrendLoading && <Loader2 className="h-3 w-3 animate-spin" />}
+                      </span>
+                    );
+                  })()
+                )}
+              </div>
               {euComps.length === 0 ? (
                 <p className="text-xs text-muted-foreground">
                   No comparable EU listings found.
@@ -766,15 +854,23 @@ export function ListingDetailDialog({
                   <Table className="w-full table-fixed">
                     <TableHeader className="sticky top-0 bg-background">
                       <TableRow>
-                        <TableHead className="h-8 w-16 text-xs">Platform</TableHead>
+                        <TableHead className="h-8 w-14 text-xs">Platform</TableHead>
                         <TableHead className="h-8 text-xs">Title</TableHead>
-                        <TableHead className="h-8 w-20 text-xs">Condition</TableHead>
-                        <TableHead className="h-8 w-12 text-xs">Loc</TableHead>
-                        <TableHead className="h-8 w-16 text-right text-xs">Price</TableHead>
+                        <TableHead className="h-8 w-16 text-xs">Cond.</TableHead>
+                        <TableHead className="h-8 w-10 text-xs">Loc</TableHead>
+                        <TableHead className="h-8 w-14 text-right text-xs">Price</TableHead>
+                        {compTrend && (
+                          <TableHead className="h-8 w-14 text-right text-xs" title="Price change vs the same item in your previous scan of this query">
+                            Δ prev
+                          </TableHead>
+                        )}
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {euComps.map((c) => (
+                      {euComps.map((c) => {
+                        const delta =
+                          compTrend && (compTrend.deltas[compTrendKey(c)?.key ?? ""] ?? undefined);
+                        return (
                         <TableRow key={c.id}>
                           <TableCell className="py-1.5 text-xs">
                             <Badge
@@ -800,8 +896,28 @@ export function ListingDetailDialog({
                           <TableCell className="py-1.5 text-right text-xs font-medium tabular-nums">
                             {eur(c.priceEur)}
                           </TableCell>
+                          {compTrend && (
+                            <TableCell className="py-1.5 text-right text-xs tabular-nums">
+                              {delta ? (
+                                <span
+                                  className={`inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
+                                    delta.deltaEur > 0
+                                      ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
+                                      : "bg-rose-500/15 text-rose-700 dark:text-rose-400"
+                                  }`}
+                                  title={`Was ${eur(delta.prevPriceEur)} in your previous scan — ${delta.source === "url" ? "same listing URL" : "matched by title"}`}
+                                >
+                                  {delta.deltaEur > 0 ? "▲" : "▼"}
+                                  {eur(Math.abs(delta.deltaEur))}
+                                </span>
+                              ) : (
+                                <span className="text-muted-foreground/40">—</span>
+                              )}
+                            </TableCell>
+                          )}
                         </TableRow>
-                      ))}
+                        );
+                      })}
                     </TableBody>
                   </Table>
                 </div>
