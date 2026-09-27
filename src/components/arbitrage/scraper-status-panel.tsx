@@ -34,6 +34,7 @@ import {
   Check,
   RotateCcw,
   Loader2,
+  Timer,
 } from "lucide-react";
 import type { ScraperStatus } from "./types";
 
@@ -107,6 +108,20 @@ function rateColor(rate: number | null): string {
   if (rate >= 50) return "bg-amber-500";
   if (rate > 0) return "bg-orange-500";
   return "bg-red-500";
+}
+
+/**
+ * Goofish Baxia rate-limit detection: when the detail text shows the search
+ * was CAPTCHA/login-walled, rapid re-scanning makes it WORSE (each attempt
+ * with a flagged fingerprint extends the block). The chip tells the user to
+ * wait ~10 minutes instead of hammering the site.
+ */
+function isBaxiaRateLimited(s: ScraperStatus): boolean {
+  if (s.site !== "goofish") return false;
+  if (s.status !== "blocked" && s.status !== "empty") return false;
+  return /baxia|captcha|login.wall|no results page|anti-bot/i.test(
+    s.detail ?? "",
+  );
 }
 
 export function ScraperStatusPanel({
@@ -257,6 +272,15 @@ export function ScraperStatusPanel({
                             {s.site === "goofish" ? "listings" : "comps"}{secs ? ` · ${secs}s` : ""}
                           </span>
                         </div>
+                        {isBaxiaRateLimited(s) && (
+                          <span
+                            className="mt-0.5 inline-flex items-center gap-1 rounded-full border border-amber-400/50 bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-amber-600 dark:text-amber-400"
+                            title="Baxia flagged this session. Scanning again right away usually extends the block — wait ~10 minutes, or paste results manually via Manual Paste."
+                          >
+                            <Timer className="h-2.5 w-2.5 animate-pulse" aria-hidden />
+                            Cooldown ~10 min
+                          </span>
+                        )}
                       </div>
                       {s.detail && (
                         <p className="mt-1 line-clamp-2 px-1 text-[10px] leading-snug text-muted-foreground" title={s.detail}>

@@ -39,11 +39,74 @@ const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined
 }
 
-export const db =
-  globalForPrisma.prisma ??
-  new PrismaClient({
+// `let` (not `const`): reconnect() replaces the client after a transient
+// SQLite failure. ES module live bindings mean every `import { db }` caller
+// automatically sees the fresh client on their next operation.
+export let db = new PrismaClient({
+  datasourceUrl: databaseUrl,
+  log: process.env.NODE_ENV === 'production' ? ['error'] : ['error', 'warn'],
+})
+
+if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = db
+
+// ── Transient write-failure recovery ────────────────────────────────────────
+// SQLite can transiently fail writes with "attempt to write a readonly
+// database" (SQLITE_READONLY_ROLLBACK, extended code 1032) when a hot journal
+// from an interrupted transaction needs rollback, or with "database is
+// locked" under concurrent writers. These almost always clear on a fresh
+// connection. Without this recovery, persistTask-style callers silently lost
+// entire scan results from history.
+const TRANSIENT_WRITE_ERRORS =
+  /readonly database|database is locked|SQLITE_READONLY|SQLITE_BUSY/i
+
+function isTransientWriteError(e: unknown): boolean {
+  const msg = e instanceof Error ? e.message : String(e)
+  return TRANSIENT_WRITE_ERRORS.test(msg)
+}
+
+function makeClient(): PrismaClient {
+  return new PrismaClient({
     datasourceUrl: databaseUrl,
     log: process.env.NODE_ENV === 'production' ? ['error'] : ['error', 'warn'],
   })
+}
 
-if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = db
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+/**
+ * Run a DB write (or read) operation with automatic recovery from transient
+ * SQLite failures. Retries up to `retries` times: each retry first forces a
+ * fresh Prisma connection (clearing any stale/hot-journal connection state),
+ * then re-runs the operation. Use for ALL durability-critical writes
+ * (persisting scan results, config edits, forex cache) — not for hot-path
+ * reads where failing fast is preferable.
+ */
+export async function withDbWriteRetry<T>(
+  op: () => Promise<T>,
+  retries = 2,
+): Promise<T> {
+  let lastError: unknown
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await op()
+    } catch (e) {
+      lastError = e
+      if (!isTransientWriteError(e) || attempt === retries) break
+      console.warn(
+        `[db] transient SQLite write failure (attempt ${attempt + 1}/${retries + 1}): ` +
+          `${e instanceof Error ? e.message.slice(0, 120) : String(e).slice(0, 120)} — reconnecting and retrying`,
+      )
+      // Force a brand-new connection: the old client may hold the stale
+      // connection that hit the hot journal / lock.
+      try {
+        await db.$disconnect()
+      } catch {
+        // ignore — the old connection may already be dead
+      }
+      db = makeClient()
+      if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = db
+      await sleep(250 * (attempt + 1)) // brief backoff: 250ms, 500ms
+    }
+  }
+  throw lastError
+}

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { db, withDbWriteRetry } from "@/lib/db";
 import { listTasks } from "@/lib/task-store";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -46,6 +46,33 @@ export async function GET() {
   // 2. Build a map of in-memory active tasks for live status overlay.
   const memTasks = listTasks();
   const memById = new Map(memTasks.map((t) => [t.id, t]));
+  // 2a. Reconcile zombie rows: a DB row stuck in a non-terminal status whose
+  //     task is NOT in the in-memory store is a scan that was interrupted by
+  //     a server restart/crash mid-scan. Left alone, the sidebar would show
+  //     "Queued / Scraping…" forever. Mark it honestly as errored and persist
+  //     the correction so future loads agree.
+  const STALE_STATUSES = ["pending", "scraping_goofish", "matching_eu", "calculating"];
+  const INTERRUPTED_MSG = "Interrupted — the server restarted while this scan was running. Re-run it from history.";
+  const zombies = dbTasks.filter(
+    (r) => STALE_STATUSES.includes(r.status) && !memById.has(r.id),
+  );
+  if (zombies.length > 0) {
+    // Fire-and-forget persistence (best-effort; response already corrected).
+    void Promise.all(
+      zombies.map((z) =>
+        withDbWriteRetry(() =>
+          db.task.update({
+            where: { id: z.id },
+            data: { status: "error", error: INTERRUPTED_MSG, step: "Interrupted" },
+          }),
+        ).catch(() => {}),
+      ),
+    );
+    for (const z of zombies) {
+      z.status = "error";
+      z.step = "Interrupted";
+    }
+  }
   // 3. Merge: prefer in-memory status for active tasks (more up-to-date),
   //    but use DB rows as the canonical list (survives restarts).
   const seenIds = new Set<string>();

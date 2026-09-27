@@ -9,7 +9,7 @@
 // multiple products run with bounded concurrency (Node async pool).
 // Anti-detection jitter is injected inside each scraper module.
 import { v4 as uuid } from "uuid";
-import { db } from "@/lib/db";
+import { db, withDbWriteRetry } from "@/lib/db";
 import { config, resolveConfig } from "@/lib/config";
 import {
   detectScam,
@@ -61,38 +61,55 @@ export async function createTask(input: SubmitInput): Promise<TaskState> {
   // lose the task from DB history when the pipeline finishes before the
   // create lands (persistTask's update would no-op on a missing row).
   try {
-    await db.task.create({
-      data: {
-        id,
-        query: input.query,
-        category: input.category,
-        status: "pending",
-        progress: 0,
-        step: "Queued",
-      },
-    });
-  } catch {
-    /* DB optional in dev */
+    await withDbWriteRetry(() =>
+      db.task.create({
+        data: {
+          id,
+          query: input.query,
+          category: input.category,
+          status: "pending",
+          progress: 0,
+          step: "Queued",
+        },
+      }),
+    );
+  } catch (e) {
+    // DB is optional in dev, but the user must KNOW history persistence failed
+    // instead of the scan silently vanishing from history later.
+    const msg = e instanceof Error ? e.message : String(e);
+    appendLog(id, "WARN", `[Persist] Could not create task row in history DB: ${msg.substring(0, 120)}`);
   }
   return state;
 }
 async function persistTask(id: string, state: TaskState): Promise<void> {
   try {
-    await db.task.update({
-      where: { id },
-      data: {
-        status: state.status,
-        progress: state.progress,
-        step: state.step,
-        error: state.error,
-        manualHtml: state.manualHtml,
-        resultsJson: state.result ? JSON.stringify(state.result) : null,
-        summaryJson: state.result ? JSON.stringify(state.result.summary) : null,
-        degraded: state.degraded,
-      },
-    });
-  } catch {
-    /* ignore DB errors */
+    // withDbWriteRetry recovers from transient SQLite failures (hot journal
+    // "readonly database" / "database is locked") by reconnecting and
+    // retrying — previously a single transient failure silently dropped the
+    // scan from history entirely.
+    await withDbWriteRetry(() =>
+      db.task.update({
+        where: { id },
+        data: {
+          status: state.status,
+          progress: state.progress,
+          step: state.step,
+          error: state.error,
+          manualHtml: state.manualHtml,
+          resultsJson: state.result ? JSON.stringify(state.result) : null,
+          summaryJson: state.result ? JSON.stringify(state.result.summary) : null,
+          degraded: state.degraded,
+        },
+      }),
+    );
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error(`[persistTask] Failed to persist task ${id} after retries: ${msg}`);
+    appendLog(
+      id,
+      "WARN",
+      `[Persist] Results could NOT be saved to history DB (${msg.substring(0, 100)}) — this scan will disappear on restart`,
+    );
   }
 }
 export function buildSummary(
@@ -127,7 +144,11 @@ export function buildSummary(
       ? Math.round(risks.reduce((a, b) => a + b, 0) / risks.length)
       : 0,
     bestProfitEur: profits.length ? Math.max(...profits) : 0,
-    bestMarginPct: margins.length ? Math.max(...margins) : 0,
+    // Round to 1dp: raw floats rendered as "620.321374151544%" in the Best
+    // Net Profit card badge.
+    bestMarginPct: margins.length
+      ? Math.round(Math.max(...margins) * 10) / 10
+      : 0,
   };
 }
 // Tracks the CURRENT pipeline generation per task. A manual-paste resume
@@ -135,6 +156,37 @@ export function buildSummary(
 // must not keep patching the task or overwrite the new run's result when it
 // finally finishes. Every state mutation is guarded with the generation check.
 const pipelineGen = new Map<string, number>();
+
+/**
+ * Last-resort watchdog around a scraper promise. Every scraper has internal
+ * timeouts, but a hung Playwright renderer (observed: 0.18s CPU over 10
+ * minutes under memory pressure) can block its promise forever, freezing the
+ * whole scan at 10%. The race fires after `budgetMs` and resolves with a
+ * timeout sentinel so the pipeline can finish and report the site honestly
+ * (the hung scraper's result, if it ever lands, is discarded).
+ */
+const SCRAPE_TIMEOUT = Symbol("scrape-timeout");
+function isScrapeTimeout<T>(v: T | typeof SCRAPE_TIMEOUT): v is typeof SCRAPE_TIMEOUT {
+  return v === SCRAPE_TIMEOUT;
+}
+function withScrapeWatchdog<T>(
+  promise: Promise<T>,
+  budgetMs: number,
+  siteLabel: string,
+): Promise<T | typeof SCRAPE_TIMEOUT> {
+  return Promise.race([
+    promise,
+    new Promise<typeof SCRAPE_TIMEOUT>((resolve) => {
+      setTimeout(() => {
+        console.warn(
+          `[Orchestrator] ${siteLabel} exceeded its ${Math.round(budgetMs / 1000)}s budget — reporting timeout (scraper may still be hung in the background)`,
+        );
+        resolve(SCRAPE_TIMEOUT);
+      }, budgetMs);
+    }),
+  ]);
+}
+
 export async function runPipeline(taskId: string): Promise<void> {
   const gen = (pipelineGen.get(taskId) ?? 0) + 1;
   pipelineGen.set(taskId, gen);
@@ -466,18 +518,68 @@ async function runPipelineInner(taskId: string, gen: number): Promise<void> {
       recordSite("amazon", "Amazon.es", 0, undefined, undefined, true);
       appendLog(taskId, "INFO", "[Amazon] Skipped by user (skip_amazon=true or skip_new=true)");
     }
-    // Wait for all scrapers to finish concurrently
+    // Wait for all scrapers to finish concurrently. Each scraper is wrapped
+    // in a watchdog budget (see withScrapeWatchdog): goofish gets 11 min
+    // (its internal overall budget is up to 10 min), EU scrapers 9 min
+    // (their bounded retries top out around 8 min). A timeout resolves as
+    // SCRAPE_TIMEOUT and is reported as an honest per-site error below.
     patch({ progress: 10, step: stepLabel });
-    const [goofishListings, olxComps, vintedComps, kkComps, amazonComps, forex] = await Promise.all([
-      goofishPromise,
-      olxPromise,
-      vintedPromise,
-      kkPromise,
-      amazonPromise,
+    const [goofishRaw, olxRaw, vintedRaw, kkRaw, amazonRaw, forex] = await Promise.all([
+      withScrapeWatchdog(goofishPromise, 660_000, "Goofish"),
+      withScrapeWatchdog(olxPromise, 540_000, "OLX"),
+      withScrapeWatchdog(vintedPromise, 540_000, "Vinted"),
+      withScrapeWatchdog(kkPromise, 540_000, "KuantoKusta"),
+      withScrapeWatchdog(amazonPromise, 540_000, "Amazon"),
       forexPromise,
     ]);
     // Stop the per-site progress updates — all scrapers are done
     stopProgress();
+    // Watchdog firings: report the site as an error so the UI shows WHY it
+    // produced nothing instead of hanging forever, and swap the sentinel for
+    // an empty array so downstream code sees plain arrays.
+    if (isScrapeTimeout(goofishRaw)) {
+      recordSite("goofish", "Goofish (闲鱼)", 0, undefined, `Scraper watchdog: exceeded its time budget (possible hung browser session under memory pressure). Its result, if any, was discarded.`);
+      warnings.push("Goofish: scraper watchdog timeout — result discarded.");
+      degraded = true;
+      appendLog(taskId, "WARN", "[ScraperStatus] ⏱️ Goofish: TIMEOUT — exceeded budget, reported as failed");
+    }
+    if (isScrapeTimeout(olxRaw)) {
+      recordSite("olx", "OLX.pt", 0, undefined, "Scraper watchdog: exceeded its time budget (possible hung browser session under memory pressure).");
+      warnings.push("OLX: scraper watchdog timeout — result discarded.");
+      degraded = true;
+      appendLog(taskId, "WARN", "[ScraperStatus] ⏱️ OLX: TIMEOUT — exceeded budget, reported as failed");
+    }
+    if (isScrapeTimeout(vintedRaw)) {
+      recordSite("vinted", "Vinted.pt", 0, undefined, "Scraper watchdog: exceeded its time budget (possible hung browser session under memory pressure).");
+      warnings.push("Vinted: scraper watchdog timeout — result discarded.");
+      degraded = true;
+      appendLog(taskId, "WARN", "[ScraperStatus] ⏱️ Vinted: TIMEOUT — exceeded budget, reported as failed");
+    }
+    if (isScrapeTimeout(kkRaw)) {
+      recordSite("kuantokusta", "KuantoKusta.pt", 0, undefined, "Scraper watchdog: exceeded its time budget (possible hung browser session under memory pressure).");
+      warnings.push("KuantoKusta: scraper watchdog timeout — result discarded.");
+      degraded = true;
+      appendLog(taskId, "WARN", "[ScraperStatus] ⏱️ KuantoKusta: TIMEOUT — exceeded budget, reported as failed");
+    }
+    if (isScrapeTimeout(amazonRaw)) {
+      recordSite("amazon", "Amazon.es", 0, undefined, "Scraper watchdog: exceeded its time budget (possible hung browser session under memory pressure).");
+      warnings.push("Amazon: scraper watchdog timeout — result discarded.");
+      degraded = true;
+      appendLog(taskId, "WARN", "[ScraperStatus] ⏱️ Amazon: TIMEOUT — exceeded budget, reported as failed");
+    }
+    // Narrow away the timeout sentinel: downstream code expects arrays.
+    const goofishListings = isScrapeTimeout(goofishRaw) ? [] : goofishRaw;
+    const olxComps = isScrapeTimeout(olxRaw) ? [] : olxRaw;
+    const vintedComps = isScrapeTimeout(vintedRaw) ? [] : vintedRaw;
+    const kkComps = isScrapeTimeout(kkRaw) ? [] : kkRaw;
+    const amazonComps = isScrapeTimeout(amazonRaw) ? [] : amazonRaw;
+    for (const s of ["goofish", "olx", "vinted", "kk", "amazon"] as const) {
+      const raw = s === "goofish" ? goofishRaw : s === "olx" ? olxRaw : s === "vinted" ? vintedRaw : s === "kk" ? kkRaw : amazonRaw;
+      if (isScrapeTimeout(raw)) {
+        siteProgress[s].status = "done";
+        siteProgress[s].count = 0;
+      }
+    }
     // Guard: a scraper promise that REJECTED (should never happen — every
     // scraper catches internally) would leave its site unrecorded. Fill any
     // gap with an error status so the UI always shows all five sites.

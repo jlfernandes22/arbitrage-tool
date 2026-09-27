@@ -6,7 +6,7 @@
 // panel and merged into `config.forex.cny_to_eur_rate` by `resolveConfig`.
 // Previously this field was dead — the UI wrote to it but forex.ts only read
 // `fallback_rate`, so the user's manual rate override had no effect.
-import { db } from "@/lib/db";
+import { db, withDbWriteRetry } from "@/lib/db";
 import { config } from "@/lib/config";
 const FOREX_TTL_MS = config.forex.ttl_seconds * 1000;
 /**
@@ -44,24 +44,28 @@ export async function getCnyToEurRate(userRateOverride?: number): Promise<{
       const rate = data.rates?.EUR;
       if (rate && rate > 0) {
         try {
-          await db.forexRate.upsert({
-            where: { fromCcy_toCcy: { fromCcy: "CNY", toCcy: "EUR" } },
-            update: {
-              rate,
-              source: "api",
-              fetchedAt: new Date(),
-              expiresAt: new Date(Date.now() + FOREX_TTL_MS),
-            },
-            create: {
-              fromCcy: "CNY",
-              toCcy: "EUR",
-              rate,
-              source: "api",
-              expiresAt: new Date(Date.now() + FOREX_TTL_MS),
-            },
-          });
+          // Forex cache write: if this transiently fails the next scan just
+          // re-fetches from the API, but retry anyway — it is nearly free.
+          await withDbWriteRetry(() =>
+            db.forexRate.upsert({
+              where: { fromCcy_toCcy: { fromCcy: "CNY", toCcy: "EUR" } },
+              update: {
+                rate,
+                source: "api",
+                fetchedAt: new Date(),
+                expiresAt: new Date(Date.now() + FOREX_TTL_MS),
+              },
+              create: {
+                fromCcy: "CNY",
+                toCcy: "EUR",
+                rate,
+                source: "api",
+                expiresAt: new Date(Date.now() + FOREX_TTL_MS),
+              },
+            }),
+          );
         } catch {
-          // ignore DB errors
+          // ignore DB errors — rate still usable for this scan
         }
         return { rate, source: "api" };
       }

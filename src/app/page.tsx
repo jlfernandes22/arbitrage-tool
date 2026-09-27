@@ -30,6 +30,8 @@ import {
   ChevronDown,
   ExternalLink,
   RotateCcw,
+  Bell,
+  BellOff,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -54,6 +56,14 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { ThemeToggle } from "@/components/theme-toggle";
+import {
+  getNotifyPreference,
+  setNotifyPreference,
+  enableNotifications,
+  notificationsSupported,
+  notifyScanFinished,
+  notifyScanFailed,
+} from "@/lib/notify";
 import {
   Collapsible,
   CollapsibleContent,
@@ -91,6 +101,17 @@ import { useSavedQueries } from "@/hooks/use-saved-queries";
 import { useKeyboardShortcuts, SHORTCUTS_HELP } from "@/hooks/use-keyboard-shortcuts";
 import type { ResultsTableHandle } from "@/components/arbitrage/results-table";
 import { toast } from "sonner";
+
+// One-click quick-start presets for the empty state. Popular high-margin
+// arbitrage searches spanning several categories.
+const QUICK_START_PRESETS: Array<{ query: string; category: Category }> = [
+  { query: "iPhone 15 Pro 256GB", category: "iphone" },
+  { query: "iPhone 13 128GB", category: "iphone" },
+  { query: "PS5 Disc Edition", category: "ps5" },
+  { query: "MacBook Air M2", category: "macbook" },
+  { query: "AirPods Pro 2", category: "iphone" },
+];
+
 export default function Home() {
   const [query, setQuery] = useState("iPhone 15 Pro 256GB");
   const [category, setCategory] = useState<Category>("iphone");
@@ -116,6 +137,12 @@ export default function Home() {
   // Scan timing: records when the current scan started so we can show
   // elapsed time and estimate remaining time based on progress.
   const scanStartedAtRef = useRef<number | null>(null);
+  // Query of the task currently being polled — used for the desktop
+  // notification body. A ref (not state) so pollStatus's deps stay unchanged.
+  const pollQueryRef = useRef<string>("");
+  // Desktop-notification toggle ("notify me when a scan finishes while I'm on
+  // another tab"). Persisted in localStorage; permission requested on enable.
+  const [notifyPref, setNotifyPref] = useState<"on" | "off">("off");
   const [scanElapsed, setScanElapsed] = useState<number>(0);
   const estimateRemaining = useCallback((progress: number, targetSec?: number): number | null => {
     if (progress >= 100) return 0;
@@ -205,6 +232,12 @@ export default function Home() {
                 toast.success(
                   `Scan complete — ${rdata.summary.shown} viable leads of ${rdata.summary.total} listings`,
                 );
+                notifyScanFinished({
+                  query: pollQueryRef.current,
+                  viable: rdata.summary.shown,
+                  total: rdata.summary.total,
+                  bestProfit: rdata.summary.bestProfitEur,
+                });
               } else {
                 // Result reload failed (e.g. task evicted after a restart) —
                 // surface it instead of silently leaving a blank screen.
@@ -222,6 +255,7 @@ export default function Home() {
             setScanning(false);
             setError(data.error ?? "Pipeline error");
             toast.error("Scan failed");
+            notifyScanFailed(pollQueryRef.current, data.error);
             return;
           } else if (data.status === "paused") {
             stopPolling();
@@ -261,11 +295,40 @@ export default function Home() {
   );
   useEffect(() => {
     mountedRef.current = true;
+    // Restore the persisted notification preference ( SSR-safe: read after
+    // mount so server render stays deterministic).
+    const pref = getNotifyPreference();
+    if (pref === "on" && notificationsSupported()) {
+      // Browser may have revoked permission since it was enabled.
+      if ("Notification" in window && Notification.permission === "granted") {
+        setNotifyPref("on");
+      } else {
+        setNotifyPreference("off");
+      }
+    }
     return () => {
       mountedRef.current = false;
       stopPolling();
     };
   }, [stopPolling]);
+  const handleToggleNotify = useCallback(async () => {
+    if (notifyPref === "on") {
+      setNotifyPref("off");
+      setNotifyPreference("off");
+      toast.info("Desktop notifications off");
+      return;
+    }
+    const perm = await enableNotifications();
+    if (perm === "granted") {
+      setNotifyPref("on");
+      setNotifyPreference("on");
+      toast.success("Notifications on — we'll ping you when a scan finishes, even in a background tab");
+    } else if (perm === "denied") {
+      toast.error("Notification permission denied. Enable it in your browser's site settings.");
+    } else {
+      toast.error("Desktop notifications are not supported in this browser.");
+    }
+  }, [notifyPref]);
   const handleScan = useCallback(
     async (q: string, c: Category, overrides: AppConfigOverrides) => {
       // Double-submit guard: two clicks in the same tick would otherwise
@@ -288,6 +351,7 @@ export default function Home() {
       setHeatmapCell(null);
       scanStartedAtRef.current = Date.now();
       setScanElapsed(0);
+      pollQueryRef.current = q;
       setHistoryRefreshKey((k) => k + 1); // refresh history so the new in-progress task appears
       try {
         const res = await fetch("/api/tasks/submit", {
@@ -332,6 +396,7 @@ export default function Home() {
         }
         toast.success("Resuming pipeline from manual paste…");
         setScanning(true);
+        pollQueryRef.current = query;
         pollStatus(taskId);
         return true;
       } catch (e) {
@@ -753,12 +818,32 @@ export default function Home() {
               <Settings2 className="h-3.5 w-3.5" />
               <span className="hidden sm:inline">Reference Prices</span>
             </Button>
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-8 w-8"
+              onClick={handleToggleNotify}
+              title={
+                notifyPref === "on"
+                  ? "Desktop notifications ON — click to disable"
+                  : "Notify me when a scan finishes (desktop notifications)"
+              }
+            >
+              {notifyPref === "on" ? (
+                <Bell className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+              ) : (
+                <BellOff className="h-3.5 w-3.5" />
+              )}
+            </Button>
             <ThemeToggle />
           </div>
         </div>
       </header>
       <main className="mx-auto flex w-full max-w-7xl flex-1 px-3 py-4 sm:px-4 sm:py-5">
-        <div className="flex flex-1 flex-col gap-4 lg:flex-row lg:gap-5">
+        {/* min-w-0: without it this flex item's min-width:auto lets the
+              sidebar + wide content (charts/tables) force horizontal page
+              overflow (observed 54px at 1280px viewport). */}
+        <div className="flex min-w-0 flex-1 flex-col gap-4 lg:flex-row lg:gap-5">
           {/* Sidebar: task history (desktop only) */}
           <aside className="hidden w-72 shrink-0 lg:block">
             {/* sticky container: pinned below the header (top-[4.5rem]) and
@@ -1656,11 +1741,27 @@ export default function Home() {
                 </span>{" "}
                 to identify profitable cross-border leads from Goofish to Portugal.
               </p>
+              {/* Interactive quick-start presets — one click launches a full
+                  scan, no typing needed. Popular high-margin searches. */}
+              <div className="mt-5">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">
+                  Quick-start presets
+                </p>
+                <div className="mt-2 flex flex-wrap items-center justify-center gap-2">
+                  {QUICK_START_PRESETS.map((p) => (
+                    <button
+                      key={p.query}
+                      type="button"
+                      onClick={() => handleScan(p.query, p.category, {})}
+                      className="group inline-flex items-center gap-1.5 rounded-full border bg-card px-3 py-1.5 text-[11px] font-medium text-muted-foreground shadow-sm transition-all hover:-translate-y-0.5 hover:border-emerald-400/60 hover:text-foreground hover:shadow-md active:translate-y-0"
+                    >
+                      <Zap className="h-3 w-3 text-emerald-500 transition-transform group-hover:scale-110" aria-hidden />
+                      {p.query}
+                    </button>
+                  ))}
+                </div>
+              </div>
               <div className="mt-4 flex flex-wrap items-center justify-center gap-2 text-[11px]">
-                <span className="flex items-center gap-1 rounded-full border bg-card px-2.5 py-1 text-muted-foreground">
-                  <Zap className="h-3 w-3 text-emerald-500" />
-                  Try a Deep Scan preset
-                </span>
                 <span className="flex items-center gap-1 rounded-full border bg-card px-2.5 py-1 text-muted-foreground">
                   <Sparkles className="h-3 w-3 text-amber-500" />
                   Pin frequent queries

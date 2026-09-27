@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { db, withDbWriteRetry } from "@/lib/db";
 import { getTask, setTask, appendLog } from "@/lib/task-store";
 import { resolveConfig } from "@/lib/config";
 import { ensureArray } from "@/lib/utils";
@@ -268,15 +268,20 @@ export async function POST(
     appendLog(id, "SUCCESS",
       `[Retry] Complete — pool ${mergedPool.length} comps, ${summary.shown}/${summary.total} viable, best profit €${Math.round(summary.bestProfitEur)}`);
     try {
-      await db.task.update({
-        where: { id },
-        data: {
-          resultsJson: JSON.stringify(result),
-          summaryJson: JSON.stringify(summary),
-        },
-      });
-    } catch {
-      /* ignore DB errors */
+      // withDbWriteRetry: retry_failed takes 30-60s of scraping — losing the
+      // merged result to a transient SQLite hiccup would waste all that work.
+      await withDbWriteRetry(() =>
+        db.task.update({
+          where: { id },
+          data: {
+            resultsJson: JSON.stringify(result),
+            summaryJson: JSON.stringify(summary),
+          },
+        }),
+      );
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      appendLog(id, "WARN", `[Retry] Persist failed: ${msg.substring(0, 100)}`);
     }
     return NextResponse.json({
       task_id: id,

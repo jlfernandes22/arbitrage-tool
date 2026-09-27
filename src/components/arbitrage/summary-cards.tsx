@@ -119,7 +119,9 @@ export function SummaryCards({ summary, activeFilter = null, onFilterChange }: S
       iconColor: "text-emerald-600 dark:text-emerald-400",
       valueTone: "text-emerald-600 dark:text-emerald-400",
       sub: "Top lead",
-      trend: `${summary.bestMarginPct}% margin`,
+      // Defensive round: persisted summaries from before the bestMarginPct
+      // rounding fix contain raw floats like 620.321374151544.
+      trend: `${Math.round(summary.bestMarginPct * 10) / 10}% margin`,
       trendTone: "up",
       // No filter — this is a metric, not a category
     },

@@ -425,6 +425,20 @@ async function scrapeAmazonLive(
       "--disable-dev-shm-usage",
     ],
   });
+  // ── Overall watchdog ──────────────────────────────────────────────────
+  // Every goto/evaluate below has a timeout EXCEPT a few page.evaluate
+  // calls (cookie banner, service-worker kill, DOM reads). A hung renderer
+  // (observed under memory pressure: 0.18s CPU over 10 minutes) blocked
+  // the ENTIRE scan forever at "scraping…". Closing the browser forces
+  // every pending Playwright call to reject, so the existing catch below
+  // returns an honest LIVE FETCH FAILED result and the pipeline continues.
+  const AMAZON_WATCHDOG_MS = 10 * 60 * 1000; // generous: > worst-case bounded retries (~8min)
+  const watchdog = setTimeout(() => {
+    console.log(
+      `[Amazon] Watchdog fired after ${AMAZON_WATCHDOG_MS / 1000}s — closing the browser to unblock a hung session`,
+    );
+    void freshBrowser.close().catch(() => {});
+  }, AMAZON_WATCHDOG_MS);
   try {
     // Probe the real engine version ONCE so every rotated session presents
     // a UA that matches the actual Chromium rendering the page.
@@ -652,6 +666,8 @@ async function scrapeAmazonLive(
     await freshBrowser.close();
     const msg = e instanceof Error ? e.message : String(e);
     return { comps: [], status: `LIVE FETCH FAILED: ${msg}` };
+  } finally {
+    clearTimeout(watchdog);
   }
 }
 
