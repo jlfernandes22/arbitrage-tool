@@ -157,37 +157,60 @@ function getMinPriceCny(category: Category): number {
  * installments, unlock services, model phones, commission scams and
  * non-electronics. These pollute the arbitrage results with useless entries.
  *
- * The box/packaging tokens are matched negation-aware via
- * `includesNonNegated` so legitimate listings like "带包装" (with original
- * packaging) or "有盒子" (has the box) are NOT rejected — only bare
- * 包装/盒子 tokens (or explicit box-only phrases like 只卖包装) are junk.
+ * Returns a human-readable REASON (or null when the listing is a real
+ * product) so the filter breakdown can report exactly why each listing
+ * was dropped — and so over-filters are debuggable from scan logs.
+ *
+ * PRECISION RULES (tuned against real dropped-title samples):
+ *  - NEVER match the bare character 包 — it kills 包邮 (free shipping),
+ *    which appears in a huge share of legitimate Xianyu titles.
+ *    Bag listings are matched with specific terms instead.
+ *  - NEVER match bare 灵动岛 — it's the Dynamic Island feature name and
+ *    appears in normal iPhone 14 Pro+ listings. Only 截图/代截 combos.
+ *  - NEVER match bare 可分 — it kills 可分开卖 ("can split the sale").
+ *  - Accessory/box/service tokens only junk SHORT titles (≤26 chars, the
+ *    typical shape of a box-only or service ad). A LONG title mentioning
+ *    包装/充电器/解锁 is a real product that INCLUDES those things —
+ *    e.g. "iPhone 15 Pro 256G 包装齐全" must survive.
+ *  - "packaging included" phrases (包装齐全 / 盒子还在 / 带 / 含 / 送 +
+ *    accessory word) are always whitelisted.
  */
-function isJunkListing(title: string): boolean {
-  const hasBoxQualifier = /[带有含].{0,3}?(?:包装|盒子)/.test(title);
-  if (!hasBoxQualifier) {
-    // Phone boxes / packaging only — catch all variants
-    if (/手机盒|包装盒|原装盒子|只是盒子|是盒子|只卖包装|空盒|纸盒|only.*box|空壳/i.test(title)) return true;
-    // Bare 包装/盒子 tokens — negation-aware, so "无包装" (no packaging)
-    // is not junk either.
-    if (includesNonNegated(title, "包装") || includesNonNegated(title, "盒子")) return true;
+function junkReason(title: string): string | null {
+  // Whitelist: accessory/packaging INCLUDED phrases — legit selling points.
+  const accIncluded =
+    /[带有含送].{0,3}?(?:包装|盒子|充电器|数据线|耳机|原盒)/.test(title) ||
+    /(?:包装|盒子).{0,5}(?:齐全|都在|完整|也有)|盒子.{0,5}(?:还在|齐全)/.test(title) ||
+    /全套|带盒|有盒|原盒/.test(title);
+  const shortAd = title.length <= 26 || /只卖|仅出|只出/.test(title);
+  // Accessory-only ads (empty boxes, chargers, cables, cases) — short titles
+  if (!accIncluded && shortAd &&
+      /手机盒|包装盒|原装盒子|空盒|纸盒|空壳|充电器|数据线|保护壳|手机壳|only.*box/i.test(title)) {
+    return "accessory-only ad (box/charger/case)";
   }
-  // Rentals / leases
-  if (/出租|租赁|租借|以租代购|免押金出租|短租/i.test(title)) return true;
+  if (!accIncluded && shortAd &&
+      (includesNonNegated(title, "包装") || includesNonNegated(title, "盒子"))) {
+    return "packaging-only ad";
+  }
+  // A LONG title that merely mentions 包装/盒子 is a real product whose
+  // packaging state is described (e.g. "…正常使用痕迹，原装包装") — keep it.
+  // Rentals / leases — junk even in long titles (a rental is never a deal)
+  if (/出租|租赁|租借|以租代购|免押金|短租/i.test(title)) return "rental/lease";
   // Installment / financing plans
-  if (/分期|首付|月供|0首付|可分|可租/i.test(title)) return true;
-  // Unlock / bypass services
-  if (/解锁|绕id|绕开|黑解|官解/i.test(title)) return true;
-  // Screenshots / digital services
-  if (/截图|灵动岛|代截/i.test(title)) return true;
+  if (/分期|首付|月供/i.test(title)) return "installment/financing";
+  // Unlock / bypass SERVICES — short titles only; a long product listing
+  // that mentions 解锁 (e.g. "卡贴已解锁") is a real phone.
+  if (shortAd && /解锁|绕id|绕开|黑解|官解/i.test(title)) return "unlock/bypass service";
+  // Screenshots / digital services (灵动岛 removed — normal feature name)
+  if (shortAd && /截图|代截/i.test(title)) return "screenshot/digital service";
   // Model phones (non-functional display units)
-  if (/模型机|模型/i.test(title)) return true;
+  if (/模型机/i.test(title) || (shortAd && /模型/i.test(title))) return "display model phone";
   // Commission / task scams
-  if (/垫付|佣金|接单|过单/i.test(title)) return true;
-  // Non-electronics (tissue paper, food, etc. that slip through)
-  if (/抽纸|纸巾|零食|水果|花盆|衣服|鞋|包/i.test(title)) return true;
+  if (/垫付|佣金|接单|过单/i.test(title)) return "commission/task scam";
+  // Non-electronics — specific terms only, NEVER the bare 包 character
+  if (/抽纸|纸巾|零食|水果|花盆|衣服|女包|双肩包|斜挎包|手提包|钱包/i.test(title)) return "non-electronics";
   // Listing has "回馈活动" (giveaway/promotional event) — not a real listing
-  if (/回馈活动|抽奖|中奖|免费送/i.test(title)) return true;
-  return false;
+  if (/回馈活动|抽奖|中奖|免费送/i.test(title)) return "giveaway/promo";
+  return null;
 }
 /**
  * Parse Goofish search-result HTML into listings.
@@ -676,43 +699,76 @@ async function scrapeGoofishLive(
     };
     // Click the "next page" arrow (right-pointing) if present. Returns true
     // only when the click succeeded AND the page actually changed.
+    // DIAGNOSTIC: records WHY pagination failed in `paginationDiag` so the
+    // final status string can report it (e.g. "pagination stopped after page
+    // 1: button not found" vs "click blocked by overlay" vs "no change").
+    let paginationDiag = "";
+    // Human-readable note about why multi-page pagination stopped early
+    // ("" if all requested pages were fetched). Surfaced in the final
+    // status string so scans report "stopped after page 1: …" clearly.
+    let lastPaginationNote = "";
+    // Per-page yield tracking: how many NEW (unique) listings each search
+    // result page contributed. Surfaced in the status string as e.g.
+    // "pages: 30+28+0" so a dead page is immediately visible in scans.
+    const pageYield: number[] = [];
     const clickNextPage = async (): Promise<boolean> => {
       // Capture the nullable `page` in a local const so TypeScript can prove
       // non-nullability inside the closure (same pattern as extractListings).
       const activePage = page;
-      if (!activePage) return false;
+      if (!activePage) { paginationDiag = "page closed"; return false;
+      }
       try {
+        // CRITICAL: remove login/Baxia overlays BEFORE attempting the click.
+        // The SMS-login modal re-appears ~10-15s after page load and covers
+        // the pagination bar — Playwright's actionability check then fails
+        // the click (element intercepted), which silently ended pagination
+        // after page 1 (the "exactly 30 listings" bug).
+        await removeGoofishOverlays(activePage);
         let nextTarget = activePage.locator("button:has([class*='search-pagination-arrow-right'])").first();
         if ((await nextTarget.count()) === 0) {
           nextTarget = activePage.locator("[class*='search-pagination-arrow-right']").first();
         }
-        if ((await nextTarget.count()) === 0) return false;
+        if ((await nextTarget.count()) === 0) { paginationDiag = "next-page button not found in DOM"; return false;
+        }
+        // Skip early if the button is disabled (last page) — clicking a
+        // disabled button throws and wastes 3s.
+        const isDisabled = await nextTarget.isDisabled().catch(() => false);
+        if (isDisabled) { paginationDiag = "next-page button disabled (last page)"; return false;
+        }
         const firstTitleBefore = (await activePage.locator("[class*='main-title']").first().textContent().catch(() => null))?.trim() ?? null;
         const countBefore = await activePage.locator("[class*='main-title']").count();
-        await nextTarget.click({ timeout: 3000 });
+        const activePageBoxBefore = await activePage.evaluate(() => document.querySelector("[class*='search-pagination-page-box-active']")?.textContent?.trim() || "").catch(() => "");
+        await nextTarget.click({ timeout: 5000 });
         await activePage.waitForTimeout(800);
-        // Wait for the page to actually change: the first title differs or
-        // the rendered card count differs.
+        // Wait for the page to actually change: the active page-box number
+        // increments (most reliable), or the first title differs, or the
+        // rendered card count differs.
         const changed = await activePage
           .waitForFunction(
-            (args: { firstTitle: string | null; countBefore: number }) => {
+            (args: { firstTitle: string | null; countBefore: number; activePageBox: string }) => {
+              const activeBox = document.querySelector("[class*='search-pagination-page-box-active']");
+              const activeText = activeBox ? activeBox.textContent?.trim() || "" : "";
+              if (args.activePageBox && activeText && activeText !== args.activePageBox) return true;
               const first = document.querySelector("[class*='main-title']");
               const firstText = first ? first.textContent?.trim() || "" : "";
               const count = document.querySelectorAll("[class*='main-title']").length;
               return firstText !== args.firstTitle || count !== args.countBefore;
             },
-            { firstTitle: firstTitleBefore, countBefore },
-            { timeout: 10000 },
+            { firstTitle: firstTitleBefore, countBefore, activePageBox: activePageBoxBefore },
+            { timeout: 12000 },
           )
           .then(() => true)
           .catch(() => false);
-        if (!changed) return false;
+        if (!changed) { paginationDiag = `clicked but page did not change (activeBox ${activePageBoxBefore || "?"} → still "${await activePage.evaluate(() => document.querySelector("[class*='search-pagination-page-box-active']")?.textContent?.trim() || "?").catch(() => "?")}")`; return false;
+        }
         // Prices hydrate after the new page renders
         await activePage.waitForTimeout(1500);
         // Re-dismiss any login/Baxia modal that reappeared during navigation
         await removeGoofishOverlays(activePage);
         return true;
-      } catch {
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        paginationDiag = `click failed: ${msg.slice(0, 120)}`;
         return false;
       }
     };
@@ -720,6 +776,7 @@ async function scrapeGoofishLive(
     for (let pageNum = 1; pageNum <= maxPages; pageNum++) {
       // ── Load + extract ALL listings on the current page ─────────
       let stableRounds = 0;
+      let pageNew = 0;
       for (let round = 0; round < MAX_SCROLL_ROUNDS; round++) {
         if (Date.now() - startTime > OVERALL_TIMEOUT_MS) break;
         // 1) Extract whatever is currently rendered
@@ -757,6 +814,7 @@ async function scrapeGoofishLive(
             addedNew++;
           }
         }
+        pageNew += addedNew;
         // 3) End-of-page detection: several consecutive scroll steps that
         //    yield zero NEW listings mean we've exhausted this page.
         if (addedNew === 0) {
@@ -773,12 +831,20 @@ async function scrapeGoofishLive(
       }
       // Settle time for prices to hydrate after the final batch
       await page.waitForTimeout(1200);
+      pageYield.push(pageNew);
+      console.warn(`[goofish] page ${pageNum}: +${pageNew} new listings (total ${allRawListings.length})`);
       // ── Move to the NEXT page ─────────────────────────────────────
       // Only after the current page has been fully exhausted.
       if (pageNum >= maxPages) break;
-      if (Date.now() - startTime > OVERALL_TIMEOUT_MS) break;
+      if (Date.now() - startTime > OVERALL_TIMEOUT_MS) { paginationDiag = `overall timeout reached before page ${pageNum + 1}`; break; }
       const wentNext = await clickNextPage();
-      if (!wentNext) break;
+      if (!wentNext) {
+        // Pagination ended early — surface WHY in the status so the user
+        // sees "stopped after page 1: …" instead of silently losing pages.
+        console.warn(`[goofish] pagination stopped after page ${pageNum}: ${paginationDiag || "unknown reason"}`);
+        lastPaginationNote = paginationDiag || "unknown reason";
+        break;
+      }
       // Goofish swaps the list in place, so the scroll position from the
       // previous page persists. Start the next page from the TOP — the
       // incremental scroll loop above relies on it to render + extract the
@@ -811,6 +877,48 @@ async function scrapeGoofishLive(
     // filtered here in Node — NOT in the browser evaluate — so the
     // positional title↔price pairing in the browser stays aligned for
     // every extracted card.
+    //
+    // ── FILTER BREAKDOWN (transparency) ─────────────────────────────
+    // Every filter step is counted so the status string can report exactly
+    // how many listings each step removed. Previously 30-35% of raw
+    // listings were silently dropped (90 raw → ~58 kept) with NO
+    // explanation — users thought pagination was still broken.
+    const dropNoPrice: typeof allRawListings = [];
+    const dropPriceRange: typeof allRawListings = [];
+    const dropIrrelevant: typeof allRawListings = [];
+    const dropJunkByReason = new Map<string, typeof allRawListings>();
+    for (const r of allRawListings) {
+      const price = parseFloat(r.priceText.replace(/,/g, ""));
+      if (!r.priceText || !(price > 0)) { dropNoPrice.push(r); continue; }
+      if ((minPriceCny > 0 && price < minPriceCny) || (maxPriceCny > 0 && price > maxPriceCny)) { dropPriceRange.push(r); continue; }
+      const jReason = junkReason(r.title);
+      if (jReason) {
+        const arr = dropJunkByReason.get(jReason) ?? [];
+        arr.push(r);
+        dropJunkByReason.set(jReason, arr);
+        continue;
+      }
+      if (!isTitleRelevant(r.title)) { dropIrrelevant.push(r); continue; }
+    }
+    const dropJunkTotal = Array.from(dropJunkByReason.values()).reduce((n, a) => n + a.length, 0);
+    const keptRaw = allRawListings.length - dropNoPrice.length - dropPriceRange.length - dropJunkTotal - dropIrrelevant.length;
+    // Sample a few dropped titles per reason — server log only, invaluable
+    // for tuning the junk/relevance filters without weakening them blindly.
+    const sampleDropped = (arr: typeof allRawListings, label: string) => {
+      if (arr.length === 0) return;
+      const samples = arr.slice(0, 4).map((r) => `"${r.title.slice(0, 70)}"`).join(" | ");
+      console.warn(`[goofish] filter[${label}] dropped ${arr.length}: ${samples}`);
+    };
+    sampleDropped(dropNoPrice, "no-price");
+    sampleDropped(dropPriceRange, "price-range");
+    for (const [reason, arr] of dropJunkByReason) sampleDropped(arr, `junk:${reason}`);
+    sampleDropped(dropIrrelevant, "off-topic");
+    const filterBreakdown =
+      `filters: ${keptRaw} kept` +
+      (dropNoPrice.length ? `, ${dropNoPrice.length} no-price` : "") +
+      (dropPriceRange.length ? `, ${dropPriceRange.length} outside price range` : "") +
+      (dropJunkTotal ? `, ${dropJunkTotal} junk (${Array.from(dropJunkByReason.entries()).map(([reason, arr]) => `${arr.length} ${reason}`).join(", ")})` : "") +
+      (dropIrrelevant.length ? `, ${dropIrrelevant.length} off-topic titles` : "");
     const listings: GoofishListing[] = allRawListings
       .filter((r) => r.priceText && parseFloat(r.priceText.replace(/,/g, "")) > 0)
       .filter((r) => {
@@ -819,7 +927,7 @@ async function scrapeGoofishLive(
         if (maxPriceCny > 0 && price > maxPriceCny) return false;
         return true;
       })
-      .filter((r) => !isJunkListing(r.title))
+      .filter((r) => !junkReason(r.title))
       .filter((r) => isTitleRelevant(r.title))
       .map((r, i) => {
         const priceCny = Math.round(parseFloat(r.priceText.replace(/,/g, "")));
@@ -872,7 +980,7 @@ async function scrapeGoofishLive(
       });
     // Build a diagnostic status string when 0 listings are extracted.
     // This helps debug why the scraper fails even though the page loaded.
-    let status = `LIVE OK (Playwright, ${listings.length} listings extracted)`;
+    let status = `LIVE OK (Playwright, ${listings.length} listings extracted from ${pageYield.length} page${pageYield.length === 1 ? "" : "s"} [${pageYield.join("+")}]; ${filterBreakdown}${lastPaginationNote ? `; pagination stopped early: ${lastPaginationNote}` : ""})`;
     if (listings.length === 0) {
       // Run a quick diagnostic to see what's on the page
       try {

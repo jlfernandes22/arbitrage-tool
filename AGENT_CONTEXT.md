@@ -60,6 +60,19 @@ Key fixes:
 - Scan History DB fallback (worked only in-memory before)
 - `pollStatus` soft-lock on 404
 - Goofish browser leak on "no results" page
+- Goofish multi-page pagination (was silently stopping after page 1: the
+  re-appearing SMS-login modal covered the pagination bar so Playwright's
+  click was intercepted; `clickNextPage` now removes overlays BEFORE the
+  click, skips disabled buttons, and detects page change via the active
+  page-box number + first-title/count. Per-page yield + stop-reason are
+  reported in the status string, e.g. `[30+28+29]`)
+- Goofish junk filter over-blocking (bare `包` killed 包邮 "free shipping"
+  titles — ~1/3 of all legit listings; bare `灵动岛`/`可分` killed normal
+  phones; long product titles mentioning 包装/充电器/解锁 were nuked by
+  box/service rules. Now `junkReason()` returns the matched reason,
+  whitelists "packaging included" phrases, and only junks SHORT
+  accessory/service ads ≤26 chars. Result: 30 → 85-87 listings per
+  3-page iPhone scan with only genuine junk dropped)
 - Multi-page fetch for KuantoKusta + Amazon (was always page 1)
 - `buildEuQuery` stray "GB" when storage undefined
 - Forex rate UI override (was dead code)
