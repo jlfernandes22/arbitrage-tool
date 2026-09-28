@@ -215,6 +215,9 @@ const SAMSUNG_MODELS: Array<{
   { re: /galaxy\s*s23\s*fe/i, family: "Galaxy S23 FE", model: "Galaxy S23 FE" },
   { re: /galaxy\s*s23/i, family: "Galaxy S23", model: "Galaxy S23" },
   // Galaxy Z Fold/Flip series
+  { re: /galaxy\s*z\s*fold\s*8\s*ultra|z\s*fold8\s*ultra/i, family: "Galaxy Z Fold8 Ultra", model: "Galaxy Z Fold8 Ultra" },
+  { re: /galaxy\s*z\s*fold\s*8(?!\d)|z\s*fold8(?!\d)/i, family: "Galaxy Z Fold8", model: "Galaxy Z Fold8" },
+  { re: /galaxy\s*z\s*flip\s*8(?!\d)|z\s*flip8(?!\d)/i, family: "Galaxy Z Flip8", model: "Galaxy Z Flip8" },
   { re: /galaxy\s*z\s*fold\s*6/i, family: "Galaxy Z Fold 6", model: "Galaxy Z Fold 6" },
   { re: /galaxy\s*z\s*fold\s*5/i, family: "Galaxy Z Fold 5", model: "Galaxy Z Fold 5" },
   { re: /galaxy\s*z\s*flip\s*6/i, family: "Galaxy Z Flip 6", model: "Galaxy Z Flip 6" },
@@ -231,6 +234,63 @@ const SAMSUNG_MODELS: Array<{
   // Galaxy A series (mid-range)
   { re: /galaxy\s*a55/i, family: "Galaxy A55", model: "Galaxy A55" },
   { re: /galaxy\s*a35/i, family: "Galaxy A35", model: "Galaxy A35" },
+  // ── Honor / Vivo / Motorola / Realme (cataloged under samsung) ──
+  // Honor Magic series (Magic 8 launched Oct 2025)
+  { re: /(?:honor|荣耀)\s*magic\s*8\s*pro/i, family: "Honor Magic 8 Pro", model: "Honor Magic 8 Pro" },
+  { re: /(?:honor|荣耀)\s*magic\s*8(?!\d)/i, family: "Honor Magic 8", model: "Honor Magic 8" },
+  { re: /(?:honor|荣耀)\s*magic\s*7\s*ultimate|magic\s*7\s*至臻/i, family: "Honor Magic 7 Ultimate", model: "Honor Magic 7 Ultimate" },
+  { re: /(?:honor|荣耀)\s*magic\s*7\s*pro/i, family: "Honor Magic 7 Pro", model: "Honor Magic 7 Pro" },
+  { re: /(?:honor|荣耀)\s*magic\s*7(?!\d)/i, family: "Honor Magic 7", model: "Honor Magic 7" },
+  { re: /(?:honor|荣耀)\s*magic\s*6\s*pro/i, family: "Honor Magic 6 Pro", model: "Honor Magic 6 Pro" },
+  { re: /(?:honor|荣耀)\s*magic\s*6(?!\d)/i, family: "Honor Magic 6", model: "Honor Magic 6" },
+  { re: /(?:honor|荣耀)\s*300\s*ultra/i, family: "Honor 300 Ultra", model: "Honor 300 Ultra" },
+  { re: /(?:honor|荣耀)\s*300\s*pro/i, family: "Honor 300 Pro", model: "Honor 300 Pro" },
+  { re: /(?:honor|荣耀)\s*300(?!\d)/i, family: "Honor 300", model: "Honor 300" },
+  { re: /(?:honor|荣耀)\s*200\s*pro/i, family: "Honor 200 Pro", model: "Honor 200 Pro" },
+  { re: /(?:honor|荣耀)\s*200(?!\d)/i, family: "Honor 200", model: "Honor 200" },
+  { re: /(?:honor|荣耀)\s*x60/i, family: "Honor X60", model: "Honor X60" },
+  { re: /(?:honor|荣耀)\s*x50/i, family: "Honor X50", model: "Honor X50" },
+  // Vivo X / V / iQOO series (X300 launched Oct 2025)
+  { re: /(?:vivo|维沃)?\s*x300\s*pro/i, family: "Vivo X300 Pro", model: "Vivo X300 Pro" },
+  { re: /(?:vivo|维沃)?\s*x300(?!\d)/i, family: "Vivo X300", model: "Vivo X300" },
+  { re: /(?:vivo|维沃)?\s*x200\s*ultra/i, family: "Vivo X200 Ultra", model: "Vivo X200 Ultra" },
+  { re: /(?:vivo|维沃)?\s*x200\s*pro/i, family: "Vivo X200 Pro", model: "Vivo X200 Pro" },
+  { re: /(?:vivo|维沃)?\s*x200(?!\d)/i, family: "Vivo X200", model: "Vivo X200" },
+  { re: /(?:vivo|维沃)?\s*x100\s*pro/i, family: "Vivo X100 Pro", model: "Vivo X100 Pro" },
+  { re: /(?:vivo|维沃)?\s*x100(?!\d)/i, family: "Vivo X100", model: "Vivo X100" },
+  { re: /(?:vivo|维沃)?\s*v40\s*pro/i, family: "Vivo V40 Pro", model: "Vivo V40 Pro" },
+  { re: /(?:vivo|维沃)?\s*v40(?!\d)/i, family: "Vivo V40", model: "Vivo V40" },
+  { re: /i[qq]oo\s*15(?!\d)/i, family: "Vivo iQOO 15", model: "Vivo iQOO 15" },
+  { re: /i[qq]oo\s*13\s*pro/i, family: "Vivo iQOO 13 Pro", model: "Vivo iQOO 13 Pro" },
+  { re: /i[qq]oo\s*13(?!\d)/i, family: "Vivo iQOO 13", model: "Vivo iQOO 13" },
+  { re: /i[qq]oo\s*neo\s*10\s*pro/i, family: "Vivo iQOO Neo 10 Pro", model: "Vivo iQOO Neo 10 Pro" },
+  { re: /i[qq]oo\s*neo\s*10(?!\d)/i, family: "Vivo iQOO Neo 10", model: "Vivo iQOO Neo 10" },
+  // Motorola Edge / Razr / Moto G (Razr 70 Ultra released Apr 2026)
+  { re: /(?:moto(?:rola)?|摩托罗拉)?\s*edge\s*70\s*pro/i, family: "Motorola Edge 70 Pro", model: "Motorola Edge 70 Pro" },
+  { re: /(?:moto(?:rola)?|摩托罗拉)?\s*edge\s*60\s*ultra/i, family: "Motorola Edge 60 Ultra", model: "Motorola Edge 60 Ultra" },
+  { re: /(?:moto(?:rola)?|摩托罗拉)?\s*edge\s*60\s*pro/i, family: "Motorola Edge 60 Pro", model: "Motorola Edge 60 Pro" },
+  { re: /(?:moto(?:rola)?|摩托罗拉)?\s*edge\s*60(?!\d)/i, family: "Motorola Edge 60", model: "Motorola Edge 60" },
+  { re: /(?:moto(?:rola)?|摩托罗拉)?\s*edge\s*50\s*ultra/i, family: "Motorola Edge 50 Ultra", model: "Motorola Edge 50 Ultra" },
+  { re: /(?:moto(?:rola)?|摩托罗拉)?\s*edge\s*50\s*pro/i, family: "Motorola Edge 50 Pro", model: "Motorola Edge 50 Pro" },
+  { re: /(?:moto(?:rola)?|摩托罗拉)?\s*edge\s*50(?!\d)/i, family: "Motorola Edge 50", model: "Motorola Edge 50" },
+  { re: /(?:moto(?:rola)?|摩托罗拉)?\s*razr\s*70\s*ultra/i, family: "Motorola Razr 70 Ultra", model: "Motorola Razr 70 Ultra" },
+  { re: /(?:moto(?:rola)?|摩托罗拉)?\s*razr\s*60\s*ultra/i, family: "Motorola Razr 60 Ultra", model: "Motorola Razr 60 Ultra" },
+  { re: /(?:moto(?:rola)?|摩托罗拉)?\s*razr\s*60(?!\d)/i, family: "Motorola Razr 60", model: "Motorola Razr 60" },
+  { re: /moto\s*g\s*power\s*5g/i, family: "Motorola Moto G Power 5G", model: "Motorola Moto G Power 5G" },
+  { re: /moto\s*g\s*stylus\s*5g/i, family: "Motorola Moto G Stylus 5G", model: "Motorola Moto G Stylus 5G" },
+  // Realme GT / numbered / Narzo series (GT 8 Pro launched Nov 2025)
+  { re: /(?:realme|真我)?\s*gt\s*8\s*pro/i, family: "Realme GT 8 Pro", model: "Realme GT 8 Pro" },
+  { re: /(?:realme|真我)?\s*gt\s*8(?!\d)/i, family: "Realme GT 8", model: "Realme GT 8" },
+  { re: /(?:realme|真我)?\s*gt\s*7\s*pro/i, family: "Realme GT 7 Pro", model: "Realme GT 7 Pro" },
+  { re: /(?:realme|真我)?\s*gt\s*7(?!\d)/i, family: "Realme GT 7", model: "Realme GT 7" },
+  { re: /(?:realme|真我)?\s*gt\s*6(?!\d)/i, family: "Realme GT 6", model: "Realme GT 6" },
+  { re: /(?:realme|真我)?\s*14\s*pro\s*\+/i, family: "Realme 14 Pro Plus", model: "Realme 14 Pro Plus" },
+  { re: /(?:realme|真我)?\s*14\s*pro(?!\+)/i, family: "Realme 14 Pro", model: "Realme 14 Pro" },
+  { re: /(?:realme|真我)?\s*13\s*pro\s*\+/i, family: "Realme 13 Pro Plus", model: "Realme 13 Pro Plus" },
+  { re: /(?:realme|真我)?\s*13\s*pro(?!\+)/i, family: "Realme 13 Pro", model: "Realme 13 Pro" },
+  { re: /(?:realme|真我)?\s*13\s*\+/i, family: "Realme 13 Plus", model: "Realme 13 Plus" },
+  { re: /narzo\s*70\s*pro/i, family: "Realme Narzo 70 Pro", model: "Realme Narzo 70 Pro" },
+  { re: /narzo\s*70(?!\d)/i, family: "Realme Narzo 70", model: "Realme Narzo 70" },
 ];
 // Apple Watch detection — by series + size
 const APPLE_WATCH_MODELS: Array<{
@@ -302,6 +362,108 @@ const DJI_MODELS: Array<{
   { re: /dji\s*inspire\s*3/i, family: "DJI Inspire 3", model: "DJI Inspire 3" },
   { re: /inspire\s*3/i, family: "DJI Inspire 3", model: "DJI Inspire 3" },
 ];
+// Xiaomi group detection — Xiaomi/Redmi/POCO phones plus OnePlus and OPPO
+// (all four brands are cataloged under category "xiaomi"). Patterns cover
+// the marketplace spellings sellers actually use: "小米18Pro", "红米K90",
+// "一加15T", "FindX10" — no space, no "B" in storage, mixed CN/EN.
+// NOTE: `(?!\d)` guards (e.g. Xiaomi\s*18(?!\d)) stop "小米180W充电器"
+// from matching the "Xiaomi 18" phone family. Most-specific pattern first
+// (.find() returns the first hit): Pro Max > Pro > T-variants > base.
+const XIAOMI_MODELS: Array<{
+  re: RegExp;
+  family: string;
+  model?: string;
+}> = [
+  // Xiaomi 18 series (2026 — Pro/Pro Max Sep 23, base 18 late 2026)
+  { re: /(?:xiaomi|小米)\s*18\s*pro\s*max/i, family: "Xiaomi 18 Pro Max", model: "Xiaomi 18 Pro Max" },
+  { re: /(?:xiaomi|小米)\s*18\s*pro/i, family: "Xiaomi 18 Pro", model: "Xiaomi 18 Pro" },
+  { re: /(?:xiaomi|小米)\s*18(?!\d)/i, family: "Xiaomi 18", model: "Xiaomi 18" },
+  // Xiaomi 17 series (2025)
+  { re: /(?:xiaomi|小米)\s*17\s*ultra/i, family: "Xiaomi 17 Ultra", model: "Xiaomi 17 Ultra" },
+  { re: /(?:xiaomi|小米)\s*17\s*pro\s*max/i, family: "Xiaomi 17 Pro Max", model: "Xiaomi 17 Pro Max" },
+  { re: /(?:xiaomi|小米)\s*17\s*pro/i, family: "Xiaomi 17 Pro", model: "Xiaomi 17 Pro" },
+  { re: /(?:xiaomi|小米)\s*17t\s*pro/i, family: "Xiaomi 17T Pro", model: "Xiaomi 17T Pro" },
+  { re: /(?:xiaomi|小米)\s*17t(?!\d)/i, family: "Xiaomi 17T", model: "Xiaomi 17T" },
+  { re: /(?:xiaomi|小米)\s*17(?!\d)/i, family: "Xiaomi 17", model: "Xiaomi 17" },
+  // Xiaomi 15 / 14 / 13 series
+  { re: /(?:xiaomi|小米)\s*15\s*ultra/i, family: "Xiaomi 15 Ultra", model: "Xiaomi 15 Ultra" },
+  { re: /(?:xiaomi|小米)\s*15\s*pro/i, family: "Xiaomi 15 Pro", model: "Xiaomi 15 Pro" },
+  { re: /(?:xiaomi|小米)\s*15t\s*pro/i, family: "Xiaomi 15T Pro", model: "Xiaomi 15T Pro" },
+  { re: /(?:xiaomi|小米)\s*15t(?!\d)/i, family: "Xiaomi 15T", model: "Xiaomi 15T" },
+  { re: /(?:xiaomi|小米)\s*15(?!\d)/i, family: "Xiaomi 15", model: "Xiaomi 15" },
+  { re: /(?:xiaomi|小米)\s*14\s*ultra/i, family: "Xiaomi 14 Ultra", model: "Xiaomi 14 Ultra" },
+  { re: /(?:xiaomi|小米)\s*14\s*pro/i, family: "Xiaomi 14 Pro", model: "Xiaomi 14 Pro" },
+  { re: /(?:xiaomi|小米)\s*14(?!\d)/i, family: "Xiaomi 14", model: "Xiaomi 14" },
+  { re: /(?:xiaomi|小米)\s*13\s*ultra/i, family: "Xiaomi 13 Ultra", model: "Xiaomi 13 Ultra" },
+  { re: /(?:xiaomi|小米)\s*13\s*pro/i, family: "Xiaomi 13 Pro", model: "Xiaomi 13 Pro" },
+  { re: /(?:xiaomi|小米)\s*13(?!\d)/i, family: "Xiaomi 13", model: "Xiaomi 13" },
+  // Redmi K series (flagship killer)
+  { re: /(?:redmi|红米)\s*k90\s*pro\s*max/i, family: "Redmi K90 Pro Max", model: "Redmi K90 Pro Max" },
+  { re: /(?:redmi|红米)\s*k90(?!\d)/i, family: "Redmi K90", model: "Redmi K90" },
+  { re: /(?:redmi|红米)\s*k80\s*pro/i, family: "Redmi K80 Pro", model: "Redmi K80 Pro" },
+  { re: /(?:redmi|红米)\s*k80(?!\d)/i, family: "Redmi K80", model: "Redmi K80" },
+  { re: /(?:redmi|红米)\s*k70e/i, family: "Redmi K70E", model: "Redmi K70E" },
+  { re: /(?:redmi|红米)\s*k70\s*pro/i, family: "Redmi K70 Pro", model: "Redmi K70 Pro" },
+  { re: /(?:redmi|红米)\s*k70(?!\d)/i, family: "Redmi K70", model: "Redmi K70" },
+  // Redmi Turbo series
+  { re: /(?:redmi|红米)\s*turbo\s*4\s*pro/i, family: "Redmi Turbo 4 Pro", model: "Redmi Turbo 4 Pro" },
+  { re: /(?:redmi|红米)\s*turbo\s*4(?!\d)/i, family: "Redmi Turbo 4", model: "Redmi Turbo 4" },
+  { re: /(?:redmi|红米)\s*turbo\s*3\s*pro/i, family: "Redmi Turbo 3 Pro", model: "Redmi Turbo 3 Pro" },
+  { re: /(?:redmi|红米)\s*turbo\s*3(?!\d)/i, family: "Redmi Turbo 3", model: "Redmi Turbo 3" },
+  // POCO series (global Redmi twins)
+  { re: /poco\s*f8\s*ultra/i, family: "POCO F8 Ultra", model: "POCO F8 Ultra" },
+  { re: /poco\s*f8\s*pro/i, family: "POCO F8 Pro", model: "POCO F8 Pro" },
+  { re: /poco\s*f7\s*ultra/i, family: "POCO F7 Ultra", model: "POCO F7 Ultra" },
+  { re: /poco\s*f7\s*pro/i, family: "POCO F7 Pro", model: "POCO F7 Pro" },
+  { re: /poco\s*f6\s*pro/i, family: "POCO F6 Pro", model: "POCO F6 Pro" },
+  { re: /poco\s*f6(?!\d)/i, family: "POCO F6", model: "POCO F6" },
+  { re: /poco\s*x7\s*pro/i, family: "POCO X7 Pro", model: "POCO X7 Pro" },
+  { re: /poco\s*x7(?!\d)/i, family: "POCO X7", model: "POCO X7" },
+  { re: /poco\s*x6\s*pro/i, family: "POCO X6 Pro", model: "POCO X6 Pro" },
+  { re: /poco\s*x6(?!\d)/i, family: "POCO X6", model: "POCO X6" },
+  // Redmi Note series (mid-range)
+  { re: /(?:redmi|红米)\s*note\s*15\s*pro\s*(?:\+|plus)/i, family: "Redmi Note 15 Pro Plus", model: "Redmi Note 15 Pro Plus" },
+  { re: /(?:redmi|红米)\s*note\s*15\s*pro/i, family: "Redmi Note 15 Pro", model: "Redmi Note 15 Pro" },
+  { re: /(?:redmi|红米)\s*note\s*15(?!\d)/i, family: "Redmi Note 15", model: "Redmi Note 15" },
+  { re: /(?:redmi|红米)\s*note\s*14\s*pro\s*(?:\+|plus)/i, family: "Redmi Note 14 Pro Plus", model: "Redmi Note 14 Pro Plus" },
+  { re: /(?:redmi|红米)\s*note\s*14\s*pro/i, family: "Redmi Note 14 Pro", model: "Redmi Note 14 Pro" },
+  { re: /(?:redmi|红米)\s*note\s*14(?!\d)/i, family: "Redmi Note 14", model: "Redmi Note 14" },
+  { re: /(?:redmi|红米)\s*note\s*13\s*pro\s*(?:\+|plus)/i, family: "Redmi Note 13 Pro Plus", model: "Redmi Note 13 Pro Plus" },
+  { re: /(?:redmi|红米)\s*note\s*13\s*pro/i, family: "Redmi Note 13 Pro", model: "Redmi Note 13 Pro" },
+  { re: /(?:redmi|红米)\s*note\s*13(?!\d)/i, family: "Redmi Note 13", model: "Redmi Note 13" },
+  { re: /(?:redmi|红米)\s*13c/i, family: "Redmi 13C", model: "Redmi 13C" },
+  // OnePlus (compact flagship 15T launched Mar 2026)
+  { re: /(?:oneplus|一加)\s*15t(?!\d)/i, family: "OnePlus 15T", model: "OnePlus 15T" },
+  { re: /(?:oneplus|一加)\s*15r/i, family: "OnePlus 15R", model: "OnePlus 15R" },
+  { re: /(?:oneplus|一加)\s*15(?!\d)/i, family: "OnePlus 15", model: "OnePlus 15" },
+  { re: /(?:oneplus|一加)\s*13t/i, family: "OnePlus 13T", model: "OnePlus 13T" },
+  { re: /(?:oneplus|一加)\s*13r/i, family: "OnePlus 13R", model: "OnePlus 13R" },
+  { re: /(?:oneplus|一加)\s*13(?!\d)/i, family: "OnePlus 13", model: "OnePlus 13" },
+  { re: /(?:oneplus|一加)\s*12r/i, family: "OnePlus 12R", model: "OnePlus 12R" },
+  { re: /(?:oneplus|一加)\s*12(?!\d)/i, family: "OnePlus 12", model: "OnePlus 12" },
+  { re: /(?:oneplus|一加)\s*nord\s*ce\s*4/i, family: "OnePlus Nord CE 4", model: "OnePlus Nord CE 4" },
+  { re: /(?:oneplus|一加)\s*nord\s*4/i, family: "OnePlus Nord 4", model: "OnePlus Nord 4" },
+  // OPPO Find / Reno (Find X10 launched Sep 22, 2026)
+  { re: /find\s*x10\s*pro\s*max/i, family: "OPPO Find X10 Pro Max", model: "OPPO Find X10 Pro Max" },
+  { re: /find\s*x10\s*pro/i, family: "OPPO Find X10 Pro", model: "OPPO Find X10 Pro" },
+  { re: /find\s*x10(?!\d)/i, family: "OPPO Find X10", model: "OPPO Find X10" },
+  { re: /find\s*x9\s*ultra/i, family: "OPPO Find X9 Ultra", model: "OPPO Find X9 Ultra" },
+  { re: /find\s*x9s\s*pro/i, family: "OPPO Find X9s Pro", model: "OPPO Find X9s Pro" },
+  { re: /find\s*x9s(?!\d)/i, family: "OPPO Find X9s", model: "OPPO Find X9s" },
+  { re: /find\s*x9\s*pro/i, family: "OPPO Find X9 Pro", model: "OPPO Find X9 Pro" },
+  { re: /find\s*x9(?!\d)/i, family: "OPPO Find X9", model: "OPPO Find X9" },
+  { re: /find\s*x8\s*ultra/i, family: "OPPO Find X8 Ultra", model: "OPPO Find X8 Ultra" },
+  { re: /find\s*x8\s*pro/i, family: "OPPO Find X8 Pro", model: "OPPO Find X8 Pro" },
+  { re: /find\s*x8(?!\d)/i, family: "OPPO Find X8", model: "OPPO Find X8" },
+  { re: /find\s*x7\s*ultra/i, family: "OPPO Find X7 Ultra", model: "OPPO Find X7 Ultra" },
+  { re: /find\s*x7\s*pro/i, family: "OPPO Find X7 Pro", model: "OPPO Find X7 Pro" },
+  { re: /reno\s*16\s*pro/i, family: "OPPO Reno 16 Pro", model: "OPPO Reno 16 Pro" },
+  { re: /reno\s*16(?!\d)/i, family: "OPPO Reno 16", model: "OPPO Reno 16" },
+  { re: /reno\s*13\s*pro/i, family: "OPPO Reno 13 Pro", model: "OPPO Reno 13 Pro" },
+  { re: /reno\s*13(?!\d)/i, family: "OPPO Reno 13", model: "OPPO Reno 13" },
+  { re: /reno\s*12\s*pro/i, family: "OPPO Reno 12 Pro", model: "OPPO Reno 12 Pro" },
+  { re: /reno\s*12(?!\d)/i, family: "OPPO Reno 12", model: "OPPO Reno 12" },
+];
 const COLORS = [
   "午夜色",
   "星光色",
@@ -370,10 +532,24 @@ export function extractStorage(text: string): { storageGB: number; raw: string }
       return { storageGB: tbVal * 1024, raw: `${tbVal}TB` };
     }
   }
-  const tb = text.match(/\b([1-9]|1[0-6])\s*(?:TB|T)\b/i) || text.match(/(?:^|\s|[^\da-zA-Z])([1-9]|1[0-6])\s*(?:TB|T)(?:[^\da-zA-Z]|$)/i);
-  if (tb) {
+  // Bare-T shorthand ("1T"/"2T") is common on Goofish, BUT a bare "T" glued
+  // to a number is ALSO how sellers write T-model names ("一加15T 16+512G",
+  // "小米17T Pro", "OnePlus 8T"). No phone has 15TB of storage — so a bare-T
+  // value > 2 is a model number, NOT capacity, and must NOT short-circuit
+  // extraction (it previously turned every 15T/17T listing into a fake
+  // "15360GB" storage variant, corrupting comp matching + ref-price lookup).
+  // Bare-T up to 8 stays valid for laptop contexts ("MacBook 8T" shorthand).
+  const laptopCtx = /macbook|笔记本|laptop|imac|mac\s*mini/i.test(text);
+  const tbCandidates = [
+    text.match(/\b([1-9]|1[0-6])\s*(TB|T)\b/i),
+    text.match(/(?:^|\s|[^\da-zA-Z])([1-9]|1[0-6])\s*(TB|T)(?:[^\da-zA-Z]|$)/i),
+  ];
+  for (const tb of tbCandidates) {
+    if (!tb) continue;
     const tbVal = parseInt(tb[1], 10);
-    if (tbVal >= 1 && tbVal <= 16) {
+    const isBareT = tb[2].toUpperCase() === "T";
+    const plausible = !isBareT || tbVal <= 2 || (laptopCtx && tbVal <= 8);
+    if (tbVal >= 1 && tbVal <= 16 && plausible) {
       return { storageGB: tbVal * 1024, raw: `${tbVal}TB` };
     }
   }
@@ -476,6 +652,13 @@ function detectCategory(text: string): Category | null {
   if (/samsung|galaxy\s*(s|z|a|note|tab)|三星/i.test(text)) return "samsung";
   if (/apple\s*watch|iwatch|苹果手表|苹果手表/i.test(text)) return "applewatch";
   if (/dji|大疆|mavic|mini\s*[34]|air\s*[23]|avata|inspire|matrice|phantom/i.test(text)) return "dji";
+  // Android brands not covered above. Xiaomi/Redmi/POCO/OnePlus/OPPO are
+  // cataloged under category "xiaomi"; Honor/Vivo/iQOO/Motorola/Realme share
+  // the "samsung" bucket (same landed-cost/lock-status treatment as Galaxy).
+  // These branches run LAST so they can never steal a title from the
+  // established iphone/macbook/ipad/ps5/samsung/applewatch/dji detectors.
+  if (/xiaomi|redmi|poco|小米|红米|oneplus|一加|oppo|欧珀|find\s*x\d|reno\s*\d{1,2}|nord/i.test(text)) return "xiaomi";
+  if (/honor|荣耀|magic\s*\d|vivo|维沃|i[qq]oo|爱酷|motorola|摩托罗拉|razr\s*\d{2}|realme|真我/i.test(text)) return "samsung";
   return null;
 }
 /**
@@ -650,6 +833,14 @@ export function normalizeListing(
     model = found.model;
   } else if (category === "dji") {
     const found = DJI_MODELS.find((m) => m.re.test(text));
+    if (!found) return null;
+    family = found.family;
+    model = found.model;
+  } else if (category === "xiaomi") {
+    // Xiaomi/Redmi/POCO + OnePlus + OPPO. Titles that hit the category but
+    // no specific phone model (e.g. "Xiaomi Pad 8", "Mi Band 9") return
+    // null — same as the pre-2026 behaviour, never a wrong family.
+    const found = XIAOMI_MODELS.find((m) => m.re.test(text));
     if (!found) return null;
     family = found.family;
     model = found.model;

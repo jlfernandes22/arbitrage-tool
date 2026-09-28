@@ -35,7 +35,8 @@ function inferCategory(standardKey: string): string {
   if (/^Galaxy/i.test(standardKey)) return "samsung";
   if (/^Apple Watch/i.test(standardKey)) return "applewatch";
   if (/^DJI/i.test(standardKey)) return "dji";
-  if (/^Xiaomi|^Redmi|^POCO/i.test(standardKey)) return "xiaomi";
+  if (/^Xiaomi|^Redmi|^POCO|^OnePlus|^OPPO/i.test(standardKey)) return "xiaomi";
+  if (/^Honor|^Vivo|^Motorola|^Realme/i.test(standardKey)) return "samsung";
   if (/^Steam Deck|^Legion Go|^ROG Ally/i.test(standardKey)) return "gaming";
   return "iphone";
 }

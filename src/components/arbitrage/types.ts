@@ -816,6 +816,9 @@ export const BRAND_CATALOG: Brand[] = [
       {
         id: "honor-phone", category: "samsung", label: "Honor Phones", emoji: "📱", hasStorage: true, hasRangeFilter: true,
         generations: [
+          gen("honor-magic-8", "Magic 8 Series", "2025", [
+            ["Magic 8 Pro", "Honor Magic 8 Pro"], ["Magic 8", "Honor Magic 8"],
+          ], "Flagship"),
           gen("honor-magic-7", "Magic 7 Series", "2025", [
             ["Magic 7 Pro", "Honor Magic 7 Pro"], ["Magic 7", "Honor Magic 7"], ["Magic 7 Ultimate", "Honor Magic 7 Ultimate"],
           ], "Flagship"),
@@ -1011,12 +1014,18 @@ export const BRAND_CATALOG: Brand[] = [
       {
         id: "motorola-phone", category: "samsung", label: "Motorola Phones", emoji: "📱", hasStorage: true, hasRangeFilter: true,
         generations: [
+          gen("moto-edge-70", "Edge 70 Series", "2026", [
+            ["Edge 70 Pro", "Motorola Edge 70 Pro"],
+          ], "Flagship"),
           gen("moto-edge-60", "Edge 60 Series", "2025", [
             ["Edge 60 Pro", "Motorola Edge 60 Pro"], ["Edge 60 Ultra", "Motorola Edge 60 Ultra"], ["Edge 60", "Motorola Edge 60"],
           ], "Flagship"),
           gen("moto-edge-50", "Edge 50 Series", "2024", [
             ["Edge 50 Pro", "Motorola Edge 50 Pro"], ["Edge 50 Ultra", "Motorola Edge 50 Ultra"], ["Edge 50", "Motorola Edge 50"],
           ], "Flagship Killer"),
+          gen("moto-razr-70", "Razr 70 Series", "2026", [
+            ["Razr 70 Ultra", "Motorola Razr 70 Ultra"],
+          ], "Flagship"),
           gen("moto-razr-60", "Razr 60 Series", "2025", [
             ["Razr 60 Ultra", "Motorola Razr 60 Ultra"], ["Razr 60", "Motorola Razr 60"],
           ], "Flagship"),
@@ -1053,6 +1062,9 @@ export const BRAND_CATALOG: Brand[] = [
       {
         id: "oneplus-phone", category: "xiaomi", label: "OnePlus Phones", emoji: "📱", hasStorage: true, hasRangeFilter: true,
         generations: [
+          gen("oneplus-15t", "OnePlus 15T", "2026", [
+            ["OnePlus 15T", "OnePlus 15T"],
+          ], "Flagship"),
           gen("oneplus-15", "OnePlus 15 Series", "2025", [
             ["OnePlus 15", "OnePlus 15"], ["OnePlus 15R", "OnePlus 15R"],
           ], "Flagship"),
@@ -1096,6 +1108,10 @@ export const BRAND_CATALOG: Brand[] = [
       {
         id: "oppo-phone", category: "xiaomi", label: "OPPO Phones", emoji: "📱", hasStorage: true, hasRangeFilter: true,
         generations: [
+          gen("oppo-find-x10", "Find X10 Series", "2026", [
+            ["Find X10 Pro Max", "OPPO Find X10 Pro Max"], ["Find X10 Pro", "OPPO Find X10 Pro"],
+            ["Find X10", "OPPO Find X10"],
+          ], "Flagship"),
           gen("oppo-find-x9", "Find X9 Series", "2025", [
             ["Find X9 Ultra", "OPPO Find X9 Ultra"], ["Find X9 Pro", "OPPO Find X9 Pro"], ["Find X9s Pro", "OPPO Find X9s Pro"], ["Find X9s", "OPPO Find X9s"],
           ], "Flagship"),
@@ -1261,6 +1277,9 @@ export const BRAND_CATALOG: Brand[] = [
       {
         id: "realme-phone", category: "samsung", label: "Realme Phones", emoji: "📱", hasStorage: true, hasRangeFilter: true,
         generations: [
+          gen("realme-gt8", "GT 8 Series", "2025", [
+            ["GT 8 Pro", "Realme GT 8 Pro"], ["GT 8", "Realme GT 8"],
+          ], "Flagship"),
           gen("realme-gt7", "GT 7 Series", "2025", [
             ["GT 7 Pro", "Realme GT 7 Pro"], ["GT 7", "Realme GT 7"],
           ], "Flagship"),
@@ -1333,6 +1352,10 @@ export const BRAND_CATALOG: Brand[] = [
       {
         id: "samsung-phone", category: "samsung", label: "Galaxy Phones", emoji: "📱", hasStorage: true, hasRangeFilter: true,
         generations: [
+          gen("galaxy-z-8", "Galaxy Z Fold8 / Flip8", "2026", [
+            ["Galaxy Z Fold8 Ultra", "Samsung Galaxy Z Fold8 Ultra"], ["Galaxy Z Fold8", "Samsung Galaxy Z Fold8"],
+            ["Galaxy Z Flip8", "Samsung Galaxy Z Flip8"],
+          ], "Flagship"),
           gen("galaxy-s26", "Galaxy S26 Series", "2026", [
             ["Galaxy S26 Ultra", "Samsung Galaxy S26 Ultra"], ["Galaxy S26+", "Samsung Galaxy S26 Plus"],
             ["Galaxy S26", "Samsung Galaxy S26"],
@@ -1505,6 +1528,9 @@ export const BRAND_CATALOG: Brand[] = [
       {
         id: "vivo-phone", category: "samsung", label: "Vivo Phones", emoji: "📱", hasStorage: true, hasRangeFilter: true,
         generations: [
+          gen("vivo-x300", "X300 Series", "2025", [
+            ["X300 Pro", "Vivo X300 Pro"], ["X300", "Vivo X300"],
+          ], "Flagship"),
           gen("vivo-x200", "X200 Series", "2025", [
             ["X200 Pro", "Vivo X200 Pro"], ["X200", "Vivo X200"], ["X200 Ultra", "Vivo X200 Ultra"],
           ], "Flagship"),
@@ -1514,6 +1540,9 @@ export const BRAND_CATALOG: Brand[] = [
           gen("vivo-v40", "V Series", "2024", [
             ["Vivo V40", "Vivo V40"], ["Vivo V40 Pro", "Vivo V40 Pro"],
           ], "Mid-Range"),
+          gen("vivo-iqoo-15", "iQOO 15 Series", "2025", [
+            ["iQOO 15", "Vivo iQOO 15"],
+          ], "Flagship Killer"),
           gen("vivo-iqoo-13", "iQOO 13 Series", "2025", [
             ["iQOO 13", "Vivo iQOO 13"], ["iQOO 13 Pro", "Vivo iQOO 13 Pro"],
           ], "Flagship Killer"),
@@ -1552,9 +1581,13 @@ export const BRAND_CATALOG: Brand[] = [
       {
         id: "xiaomi-phone", category: "xiaomi", label: "Xiaomi Phones", emoji: "📱", hasStorage: true, hasRangeFilter: true,
         generations: [
+          gen("xiaomi-18", "Xiaomi 18 Series", "2026", [
+            ["Xiaomi 18 Pro Max", "Xiaomi 18 Pro Max"], ["Xiaomi 18 Pro", "Xiaomi 18 Pro"],
+            ["Xiaomi 18", "Xiaomi 18"],
+          ], "Flagship"),
           gen("xiaomi-17", "Xiaomi 17 Series", "2025", [
-            ["Xiaomi 17 Ultra", "Xiaomi 17 Ultra"], ["Xiaomi 17 Pro", "Xiaomi 17 Pro"],
-            ["Xiaomi 17", "Xiaomi 17"],
+            ["Xiaomi 17 Ultra", "Xiaomi 17 Ultra"], ["Xiaomi 17 Pro Max", "Xiaomi 17 Pro Max"],
+            ["Xiaomi 17 Pro", "Xiaomi 17 Pro"], ["Xiaomi 17", "Xiaomi 17"],
           ], "Flagship"),
           gen("xiaomi-17t", "Xiaomi 17T Series", "2026", [
             ["Xiaomi 17T Pro", "Xiaomi 17T Pro"], ["Xiaomi 17T", "Xiaomi 17T"],
@@ -1574,6 +1607,9 @@ export const BRAND_CATALOG: Brand[] = [
             ["Xiaomi 13 Ultra", "Xiaomi 13 Ultra"], ["Xiaomi 13 Pro", "Xiaomi 13 Pro"],
             ["Xiaomi 13", "Xiaomi 13"],
           ], "Flagship"),
+          gen("redmi-k90", "Redmi K90 Series", "2025", [
+            ["Redmi K90 Pro Max", "Redmi K90 Pro Max"], ["Redmi K90", "Redmi K90"],
+          ], "Flagship Killer"),
           gen("redmi-k80", "Redmi K80 Series", "2024", [
             ["Redmi K80 Pro", "Redmi K80 Pro"], ["Redmi K80", "Redmi K80"],
           ], "Flagship Killer"),
@@ -1585,6 +1621,9 @@ export const BRAND_CATALOG: Brand[] = [
           ], "Flagship Killer"),
           gen("redmi-turbo-3", "Redmi Turbo 3 Series", "2024", [
             ["Redmi Turbo 3 Pro", "Redmi Turbo 3 Pro"], ["Redmi Turbo 3", "Redmi Turbo 3"],
+          ], "Flagship Killer"),
+          gen("poco-f8", "POCO F8 Series", "2025", [
+            ["POCO F8 Ultra", "POCO F8 Ultra"], ["POCO F8 Pro", "POCO F8 Pro"],
           ], "Flagship Killer"),
           gen("poco-f7", "POCO F7 Series", "2025", [
             ["POCO F7 Pro", "POCO F7 Pro"], ["POCO F7 Ultra", "POCO F7 Ultra"],
@@ -1719,6 +1758,7 @@ const RELEASE_DATE_OVERRIDES: Record<string, string> = {
   "watch-series-9": "2023",
   // Samsung — Galaxy S / Z / Tab / Book / Buds
   "galaxy-s26": "2026",
+  "galaxy-z-8": "2026",
   "galaxy-s25": "2025",
   "galaxy-s24": "2024",
   "galaxy-z": "2024",
@@ -1728,7 +1768,10 @@ const RELEASE_DATE_OVERRIDES: Record<string, string> = {
   "galaxy-book-4": "2024",
   "buds-3": "2024",
   // Xiaomi
+  "xiaomi-18": "2026",
   "xiaomi-17": "2025",
+  "redmi-k90": "2025",
+  "poco-f8": "2025",
   "xiaomi-17t": "2026",
   "xiaomi-15": "2024",
   "xiaomi-15t": "2024",
@@ -1742,6 +1785,7 @@ const RELEASE_DATE_OVERRIDES: Record<string, string> = {
   "xiaomi-pad-7": "2024",
   "xiaomi-band": "2024",
   // OnePlus
+  "oneplus-15t": "2026",
   "oneplus-15": "2025",
   "oneplus-13": "2025",
   "oneplus-13r": "2025",
@@ -1788,6 +1832,7 @@ const RELEASE_DATE_OVERRIDES: Record<string, string> = {
   "insta360-ace": "2023",
   "insta360-go3": "2023",
   // OPPO / Honor / Realme / Vivo / Motorola flagships
+  "oppo-find-x10": "2026",
   "oppo-find-x9": "2025",
   "oppo-find-x8": "2024",
   "oppo-find-x7": "2024",
@@ -1795,21 +1840,27 @@ const RELEASE_DATE_OVERRIDES: Record<string, string> = {
   "oppo-reno12": "2024",
   "oppo-pad-3": "2024",
   "oppo-enco-x3": "2024",
+  "honor-magic-8": "2025",
   "honor-magic-7": "2024",
   "honor-magic-6": "2024",
   "honor-300": "2024",
   "honor-200": "2024",
+  "realme-gt8": "2025",
   "realme-gt7": "2025",
   "realme-gt6": "2024",
   "realme-14": "2025",
   "realme-13": "2024",
+  "vivo-x300": "2025",
   "vivo-x200": "2024",
   "vivo-x100": "2023",
   "vivo-v40": "2024",
+  "vivo-iqoo-15": "2025",
   "vivo-iqoo-13": "2024",
   "vivo-iqoo-neo10": "2024",
+  "moto-edge-70": "2026",
   "moto-edge-60": "2025",
   "moto-edge-50": "2024",
+  "moto-razr-70": "2026",
   "moto-razr-60": "2025",
   "sony-wh": "2025",
   "sony-wf": "2023",
@@ -1908,6 +1959,30 @@ const MODEL_RELEASE_DATES: Record<string, string> = {
   // Redmi K80 series
   "Redmi K80 Pro": "2024",
   "Redmi K80": "2024",
+  // ── 2025/2026 Android flagships (Sep 2026 catalog refresh) ──
+  "Xiaomi 18 Pro Max": "2026",
+  "Xiaomi 18 Pro": "2026",
+  "Xiaomi 18": "2026",
+  "Redmi K90 Pro Max": "2025",
+  "Redmi K90": "2025",
+  "POCO F8 Ultra": "2025",
+  "POCO F8 Pro": "2025",
+  "Samsung Galaxy Z Fold8 Ultra": "2026",
+  "Samsung Galaxy Z Fold8": "2026",
+  "Samsung Galaxy Z Flip8": "2026",
+  "OnePlus 15T": "2026",
+  "OPPO Find X10 Pro Max": "2026",
+  "OPPO Find X10 Pro": "2026",
+  "OPPO Find X10": "2026",
+  "Honor Magic 8 Pro": "2025",
+  "Honor Magic 8": "2025",
+  "Realme GT 8 Pro": "2025",
+  "Realme GT 8": "2025",
+  "Vivo X300 Pro": "2025",
+  "Vivo X300": "2025",
+  "Vivo iQOO 15": "2025",
+  "Motorola Razr 70 Ultra": "2026",
+  "Motorola Edge 70 Pro": "2026",
   // Redmi Note 15 series (2025)
   "Redmi Note 15 Pro Plus": "2025",
   "Redmi Note 15 Pro": "2025",

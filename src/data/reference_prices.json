@@ -1846,5 +1846,852 @@
     "very_good": 24,
     "good": 19,
     "fair": 14
+  },
+  "Xiaomi 18 Pro Max 256GB": {
+    "new": 1250,
+    "excellent": 1050,
+    "very_good": 900,
+    "good": 725,
+    "fair": 550
+  },
+  "Xiaomi 18 Pro Max 512GB": {
+    "new": 1375,
+    "excellent": 1155,
+    "very_good": 990,
+    "good": 800,
+    "fair": 605
+  },
+  "Xiaomi 18 Pro Max 1TB": {
+    "new": 1525,
+    "excellent": 1280,
+    "very_good": 1100,
+    "good": 885,
+    "fair": 670
+  },
+  "Xiaomi 18 Pro 256GB": {
+    "new": 1050,
+    "excellent": 880,
+    "very_good": 755,
+    "good": 610,
+    "fair": 460
+  },
+  "Xiaomi 18 Pro 512GB": {
+    "new": 1155,
+    "excellent": 970,
+    "very_good": 830,
+    "good": 670,
+    "fair": 510
+  },
+  "Xiaomi 18 Pro 1TB": {
+    "new": 1280,
+    "excellent": 1075,
+    "very_good": 920,
+    "good": 745,
+    "fair": 565
+  },
+  "Xiaomi 18 256GB": {
+    "new": 850,
+    "excellent": 715,
+    "very_good": 610,
+    "good": 495,
+    "fair": 375
+  },
+  "Xiaomi 18 512GB": {
+    "new": 935,
+    "excellent": 785,
+    "very_good": 675,
+    "good": 540,
+    "fair": 410
+  },
+  "Xiaomi 17 Ultra 256GB": {
+    "new": 1200,
+    "excellent": 1010,
+    "very_good": 865,
+    "good": 695,
+    "fair": 530
+  },
+  "Xiaomi 17 Ultra 512GB": {
+    "new": 1320,
+    "excellent": 1110,
+    "very_good": 950,
+    "good": 765,
+    "fair": 580
+  },
+  "Xiaomi 17 Ultra 1TB": {
+    "new": 1465,
+    "excellent": 1230,
+    "very_good": 1055,
+    "good": 850,
+    "fair": 645
+  },
+  "Xiaomi 17 Pro Max 256GB": {
+    "new": 1100,
+    "excellent": 925,
+    "very_good": 790,
+    "good": 640,
+    "fair": 485
+  },
+  "Xiaomi 17 Pro Max 512GB": {
+    "new": 1210,
+    "excellent": 1015,
+    "very_good": 870,
+    "good": 700,
+    "fair": 530
+  },
+  "Xiaomi 17 Pro Max 1TB": {
+    "new": 1340,
+    "excellent": 1125,
+    "very_good": 965,
+    "good": 780,
+    "fair": 590
+  },
+  "Xiaomi 17 Pro 256GB": {
+    "new": 950,
+    "excellent": 800,
+    "very_good": 685,
+    "good": 550,
+    "fair": 420
+  },
+  "Xiaomi 17 Pro 512GB": {
+    "new": 1045,
+    "excellent": 880,
+    "very_good": 750,
+    "good": 605,
+    "fair": 460
+  },
+  "Xiaomi 17 Pro 1TB": {
+    "new": 1160,
+    "excellent": 975,
+    "very_good": 835,
+    "good": 670,
+    "fair": 510
+  },
+  "Xiaomi 17 256GB": {
+    "new": 800,
+    "excellent": 670,
+    "very_good": 575,
+    "good": 465,
+    "fair": 350
+  },
+  "Xiaomi 17 512GB": {
+    "new": 880,
+    "excellent": 740,
+    "very_good": 635,
+    "good": 510,
+    "fair": 385
+  },
+  "Xiaomi 17T Pro 256GB": {
+    "new": 720,
+    "excellent": 605,
+    "very_good": 520,
+    "good": 420,
+    "fair": 315
+  },
+  "Xiaomi 17T Pro 512GB": {
+    "new": 790,
+    "excellent": 665,
+    "very_good": 570,
+    "good": 460,
+    "fair": 350
+  },
+  "Xiaomi 17T 256GB": {
+    "new": 620,
+    "excellent": 520,
+    "very_good": 445,
+    "good": 360,
+    "fair": 275
+  },
+  "Xiaomi 17T 512GB": {
+    "new": 680,
+    "excellent": 575,
+    "very_good": 490,
+    "good": 395,
+    "fair": 300
+  },
+  "Redmi K90 Pro Max 256GB": {
+    "new": 680,
+    "excellent": 570,
+    "very_good": 490,
+    "good": 395,
+    "fair": 300
+  },
+  "Redmi K90 Pro Max 512GB": {
+    "new": 750,
+    "excellent": 630,
+    "very_good": 540,
+    "good": 435,
+    "fair": 330
+  },
+  "Redmi K90 256GB": {
+    "new": 550,
+    "excellent": 460,
+    "very_good": 395,
+    "good": 320,
+    "fair": 240
+  },
+  "Redmi K90 512GB": {
+    "new": 605,
+    "excellent": 510,
+    "very_good": 435,
+    "good": 350,
+    "fair": 265
+  },
+  "POCO F8 Ultra 256GB": {
+    "new": 700,
+    "excellent": 590,
+    "very_good": 505,
+    "good": 405,
+    "fair": 310
+  },
+  "POCO F8 Ultra 512GB": {
+    "new": 770,
+    "excellent": 645,
+    "very_good": 555,
+    "good": 445,
+    "fair": 340
+  },
+  "POCO F8 Pro 256GB": {
+    "new": 600,
+    "excellent": 505,
+    "very_good": 430,
+    "good": 350,
+    "fair": 265
+  },
+  "POCO F8 Pro 512GB": {
+    "new": 660,
+    "excellent": 555,
+    "very_good": 475,
+    "good": 385,
+    "fair": 290
+  },
+  "Galaxy S26 Ultra 256GB": {
+    "new": 1250,
+    "excellent": 1050,
+    "very_good": 900,
+    "good": 725,
+    "fair": 550
+  },
+  "Galaxy S26 Ultra 512GB": {
+    "new": 1375,
+    "excellent": 1155,
+    "very_good": 990,
+    "good": 800,
+    "fair": 605
+  },
+  "Galaxy S26 Ultra 1TB": {
+    "new": 1525,
+    "excellent": 1280,
+    "very_good": 1100,
+    "good": 885,
+    "fair": 670
+  },
+  "Galaxy S26 Plus 256GB": {
+    "new": 1000,
+    "excellent": 840,
+    "very_good": 720,
+    "good": 580,
+    "fair": 440
+  },
+  "Galaxy S26 Plus 512GB": {
+    "new": 1100,
+    "excellent": 925,
+    "very_good": 790,
+    "good": 640,
+    "fair": 485
+  },
+  "Galaxy S26 256GB": {
+    "new": 850,
+    "excellent": 715,
+    "very_good": 610,
+    "good": 495,
+    "fair": 375
+  },
+  "Galaxy S26 512GB": {
+    "new": 935,
+    "excellent": 785,
+    "very_good": 675,
+    "good": 540,
+    "fair": 410
+  },
+  "Galaxy Z Fold8 Ultra 256GB": {
+    "new": 2100,
+    "excellent": 1765,
+    "very_good": 1510,
+    "good": 1220,
+    "fair": 925
+  },
+  "Galaxy Z Fold8 Ultra 512GB": {
+    "new": 2310,
+    "excellent": 1940,
+    "very_good": 1665,
+    "good": 1340,
+    "fair": 1015
+  },
+  "Galaxy Z Fold8 Ultra 1TB": {
+    "new": 2560,
+    "excellent": 2150,
+    "very_good": 1845,
+    "good": 1485,
+    "fair": 1125
+  },
+  "Galaxy Z Fold8 256GB": {
+    "new": 1800,
+    "excellent": 1510,
+    "very_good": 1295,
+    "good": 1045,
+    "fair": 790
+  },
+  "Galaxy Z Fold8 512GB": {
+    "new": 1980,
+    "excellent": 1665,
+    "very_good": 1425,
+    "good": 1150,
+    "fair": 870
+  },
+  "Galaxy Z Flip8 256GB": {
+    "new": 1150,
+    "excellent": 965,
+    "very_good": 830,
+    "good": 665,
+    "fair": 505
+  },
+  "Galaxy Z Flip8 512GB": {
+    "new": 1265,
+    "excellent": 1065,
+    "very_good": 910,
+    "good": 735,
+    "fair": 555
+  },
+  "Galaxy S25 Ultra 256GB": {
+    "new": 1000,
+    "excellent": 840,
+    "very_good": 720,
+    "good": 580,
+    "fair": 440
+  },
+  "Galaxy S25 Ultra 512GB": {
+    "new": 1100,
+    "excellent": 925,
+    "very_good": 790,
+    "good": 640,
+    "fair": 485
+  },
+  "Galaxy S25 Ultra 1TB": {
+    "new": 1220,
+    "excellent": 1025,
+    "very_good": 880,
+    "good": 710,
+    "fair": 535
+  },
+  "Galaxy S25 Plus 256GB": {
+    "new": 820,
+    "excellent": 690,
+    "very_good": 590,
+    "good": 475,
+    "fair": 360
+  },
+  "Galaxy S25 Plus 512GB": {
+    "new": 900,
+    "excellent": 760,
+    "very_good": 650,
+    "good": 525,
+    "fair": 395
+  },
+  "Galaxy S25 256GB": {
+    "new": 700,
+    "excellent": 590,
+    "very_good": 505,
+    "good": 405,
+    "fair": 310
+  },
+  "Galaxy S25 512GB": {
+    "new": 770,
+    "excellent": 645,
+    "very_good": 555,
+    "good": 445,
+    "fair": 340
+  },
+  "OnePlus 15T 256GB": {
+    "new": 720,
+    "excellent": 605,
+    "very_good": 520,
+    "good": 420,
+    "fair": 315
+  },
+  "OnePlus 15T 512GB": {
+    "new": 790,
+    "excellent": 665,
+    "very_good": 570,
+    "good": 460,
+    "fair": 350
+  },
+  "OnePlus 15 256GB": {
+    "new": 880,
+    "excellent": 740,
+    "very_good": 635,
+    "good": 510,
+    "fair": 385
+  },
+  "OnePlus 15 512GB": {
+    "new": 970,
+    "excellent": 815,
+    "very_good": 695,
+    "good": 560,
+    "fair": 425
+  },
+  "OnePlus 15R 256GB": {
+    "new": 640,
+    "excellent": 540,
+    "very_good": 460,
+    "good": 370,
+    "fair": 280
+  },
+  "OnePlus 15R 512GB": {
+    "new": 705,
+    "excellent": 590,
+    "very_good": 505,
+    "good": 410,
+    "fair": 310
+  },
+  "OPPO Find X10 Pro Max 256GB": {
+    "new": 1250,
+    "excellent": 1050,
+    "very_good": 900,
+    "good": 725,
+    "fair": 550
+  },
+  "OPPO Find X10 Pro Max 512GB": {
+    "new": 1375,
+    "excellent": 1155,
+    "very_good": 990,
+    "good": 800,
+    "fair": 605
+  },
+  "OPPO Find X10 Pro Max 1TB": {
+    "new": 1525,
+    "excellent": 1280,
+    "very_good": 1100,
+    "good": 885,
+    "fair": 670
+  },
+  "OPPO Find X10 Pro 256GB": {
+    "new": 1100,
+    "excellent": 925,
+    "very_good": 790,
+    "good": 640,
+    "fair": 485
+  },
+  "OPPO Find X10 Pro 512GB": {
+    "new": 1210,
+    "excellent": 1015,
+    "very_good": 870,
+    "good": 700,
+    "fair": 530
+  },
+  "OPPO Find X10 Pro 1TB": {
+    "new": 1340,
+    "excellent": 1125,
+    "very_good": 965,
+    "good": 780,
+    "fair": 590
+  },
+  "OPPO Find X10 256GB": {
+    "new": 880,
+    "excellent": 740,
+    "very_good": 635,
+    "good": 510,
+    "fair": 385
+  },
+  "OPPO Find X10 512GB": {
+    "new": 970,
+    "excellent": 815,
+    "very_good": 695,
+    "good": 560,
+    "fair": 425
+  },
+  "Honor Magic 8 Pro 256GB": {
+    "new": 980,
+    "excellent": 825,
+    "very_good": 705,
+    "good": 570,
+    "fair": 430
+  },
+  "Honor Magic 8 Pro 512GB": {
+    "new": 1080,
+    "excellent": 905,
+    "very_good": 775,
+    "good": 625,
+    "fair": 475
+  },
+  "Honor Magic 8 256GB": {
+    "new": 780,
+    "excellent": 655,
+    "very_good": 560,
+    "good": 450,
+    "fair": 345
+  },
+  "Honor Magic 8 512GB": {
+    "new": 860,
+    "excellent": 720,
+    "very_good": 620,
+    "good": 500,
+    "fair": 380
+  },
+  "Realme GT 8 Pro 256GB": {
+    "new": 880,
+    "excellent": 740,
+    "very_good": 635,
+    "good": 510,
+    "fair": 385
+  },
+  "Realme GT 8 Pro 512GB": {
+    "new": 970,
+    "excellent": 815,
+    "very_good": 695,
+    "good": 560,
+    "fair": 425
+  },
+  "Realme GT 8 256GB": {
+    "new": 680,
+    "excellent": 570,
+    "very_good": 490,
+    "good": 395,
+    "fair": 300
+  },
+  "Realme GT 8 512GB": {
+    "new": 750,
+    "excellent": 630,
+    "very_good": 540,
+    "good": 435,
+    "fair": 330
+  },
+  "Vivo X300 Pro 256GB": {
+    "new": 1180,
+    "excellent": 990,
+    "very_good": 850,
+    "good": 685,
+    "fair": 520
+  },
+  "Vivo X300 Pro 512GB": {
+    "new": 1300,
+    "excellent": 1090,
+    "very_good": 935,
+    "good": 755,
+    "fair": 570
+  },
+  "Vivo X300 256GB": {
+    "new": 880,
+    "excellent": 740,
+    "very_good": 635,
+    "good": 510,
+    "fair": 385
+  },
+  "Vivo X300 512GB": {
+    "new": 970,
+    "excellent": 815,
+    "very_good": 695,
+    "good": 560,
+    "fair": 425
+  },
+  "Vivo iQOO 15 256GB": {
+    "new": 780,
+    "excellent": 655,
+    "very_good": 560,
+    "good": 450,
+    "fair": 345
+  },
+  "Vivo iQOO 15 512GB": {
+    "new": 860,
+    "excellent": 720,
+    "very_good": 620,
+    "good": 500,
+    "fair": 380
+  },
+  "Motorola Razr 70 Ultra 256GB": {
+    "new": 1250,
+    "excellent": 1050,
+    "very_good": 900,
+    "good": 725,
+    "fair": 550
+  },
+  "Motorola Razr 70 Ultra 512GB": {
+    "new": 1375,
+    "excellent": 1155,
+    "very_good": 990,
+    "good": 800,
+    "fair": 605
+  },
+  "Motorola Edge 70 Pro 256GB": {
+    "new": 780,
+    "excellent": 655,
+    "very_good": 560,
+    "good": 450,
+    "fair": 345
+  },
+  "Motorola Edge 70 Pro 512GB": {
+    "new": 860,
+    "excellent": 720,
+    "very_good": 620,
+    "good": 500,
+    "fair": 380
+  },
+  "Xiaomi 18 Pro Max": {
+    "new": 1250,
+    "excellent": 1050,
+    "very_good": 900,
+    "good": 725,
+    "fair": 550
+  },
+  "Xiaomi 18 Pro": {
+    "new": 1050,
+    "excellent": 880,
+    "very_good": 755,
+    "good": 610,
+    "fair": 460
+  },
+  "Xiaomi 18": {
+    "new": 850,
+    "excellent": 715,
+    "very_good": 610,
+    "good": 495,
+    "fair": 375
+  },
+  "Xiaomi 17 Ultra": {
+    "new": 1200,
+    "excellent": 1010,
+    "very_good": 865,
+    "good": 695,
+    "fair": 530
+  },
+  "Xiaomi 17 Pro Max": {
+    "new": 1100,
+    "excellent": 925,
+    "very_good": 790,
+    "good": 640,
+    "fair": 485
+  },
+  "Xiaomi 17 Pro": {
+    "new": 950,
+    "excellent": 800,
+    "very_good": 685,
+    "good": 550,
+    "fair": 420
+  },
+  "Xiaomi 17": {
+    "new": 800,
+    "excellent": 670,
+    "very_good": 575,
+    "good": 465,
+    "fair": 350
+  },
+  "Xiaomi 17T Pro": {
+    "new": 720,
+    "excellent": 605,
+    "very_good": 520,
+    "good": 420,
+    "fair": 315
+  },
+  "Xiaomi 17T": {
+    "new": 620,
+    "excellent": 520,
+    "very_good": 445,
+    "good": 360,
+    "fair": 275
+  },
+  "Redmi K90 Pro Max": {
+    "new": 680,
+    "excellent": 570,
+    "very_good": 490,
+    "good": 395,
+    "fair": 300
+  },
+  "Redmi K90": {
+    "new": 550,
+    "excellent": 460,
+    "very_good": 395,
+    "good": 320,
+    "fair": 240
+  },
+  "POCO F8 Ultra": {
+    "new": 700,
+    "excellent": 590,
+    "very_good": 505,
+    "good": 405,
+    "fair": 310
+  },
+  "POCO F8 Pro": {
+    "new": 600,
+    "excellent": 505,
+    "very_good": 430,
+    "good": 350,
+    "fair": 265
+  },
+  "Galaxy S26 Ultra": {
+    "new": 1250,
+    "excellent": 1050,
+    "very_good": 900,
+    "good": 725,
+    "fair": 550
+  },
+  "Galaxy S26 Plus": {
+    "new": 1000,
+    "excellent": 840,
+    "very_good": 720,
+    "good": 580,
+    "fair": 440
+  },
+  "Galaxy S26": {
+    "new": 850,
+    "excellent": 715,
+    "very_good": 610,
+    "good": 495,
+    "fair": 375
+  },
+  "Galaxy Z Fold8 Ultra": {
+    "new": 2100,
+    "excellent": 1765,
+    "very_good": 1510,
+    "good": 1220,
+    "fair": 925
+  },
+  "Galaxy Z Fold8": {
+    "new": 1800,
+    "excellent": 1510,
+    "very_good": 1295,
+    "good": 1045,
+    "fair": 790
+  },
+  "Galaxy Z Flip8": {
+    "new": 1150,
+    "excellent": 965,
+    "very_good": 830,
+    "good": 665,
+    "fair": 505
+  },
+  "Galaxy S25 Ultra": {
+    "new": 1000,
+    "excellent": 840,
+    "very_good": 720,
+    "good": 580,
+    "fair": 440
+  },
+  "Galaxy S25 Plus": {
+    "new": 820,
+    "excellent": 690,
+    "very_good": 590,
+    "good": 475,
+    "fair": 360
+  },
+  "Galaxy S25": {
+    "new": 700,
+    "excellent": 590,
+    "very_good": 505,
+    "good": 405,
+    "fair": 310
+  },
+  "OnePlus 15T": {
+    "new": 720,
+    "excellent": 605,
+    "very_good": 520,
+    "good": 420,
+    "fair": 315
+  },
+  "OnePlus 15": {
+    "new": 880,
+    "excellent": 740,
+    "very_good": 635,
+    "good": 510,
+    "fair": 385
+  },
+  "OnePlus 15R": {
+    "new": 640,
+    "excellent": 540,
+    "very_good": 460,
+    "good": 370,
+    "fair": 280
+  },
+  "OPPO Find X10 Pro Max": {
+    "new": 1250,
+    "excellent": 1050,
+    "very_good": 900,
+    "good": 725,
+    "fair": 550
+  },
+  "OPPO Find X10 Pro": {
+    "new": 1100,
+    "excellent": 925,
+    "very_good": 790,
+    "good": 640,
+    "fair": 485
+  },
+  "OPPO Find X10": {
+    "new": 880,
+    "excellent": 740,
+    "very_good": 635,
+    "good": 510,
+    "fair": 385
+  },
+  "Honor Magic 8 Pro": {
+    "new": 980,
+    "excellent": 825,
+    "very_good": 705,
+    "good": 570,
+    "fair": 430
+  },
+  "Honor Magic 8": {
+    "new": 780,
+    "excellent": 655,
+    "very_good": 560,
+    "good": 450,
+    "fair": 345
+  },
+  "Realme GT 8 Pro": {
+    "new": 880,
+    "excellent": 740,
+    "very_good": 635,
+    "good": 510,
+    "fair": 385
+  },
+  "Realme GT 8": {
+    "new": 680,
+    "excellent": 570,
+    "very_good": 490,
+    "good": 395,
+    "fair": 300
+  },
+  "Vivo X300 Pro": {
+    "new": 1180,
+    "excellent": 990,
+    "very_good": 850,
+    "good": 685,
+    "fair": 520
+  },
+  "Vivo X300": {
+    "new": 880,
+    "excellent": 740,
+    "very_good": 635,
+    "good": 510,
+    "fair": 385
+  },
+  "Vivo iQOO 15": {
+    "new": 780,
+    "excellent": 655,
+    "very_good": 560,
+    "good": 450,
+    "fair": 345
+  },
+  "Motorola Razr 70 Ultra": {
+    "new": 1250,
+    "excellent": 1050,
+    "very_good": 900,
+    "good": 725,
+    "fair": 550
+  },
+  "Motorola Edge 70 Pro": {
+    "new": 780,
+    "excellent": 655,
+    "very_good": 560,
+    "good": 450,
+    "fair": 345
   }
 }
