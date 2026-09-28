@@ -1,15 +1,16 @@
 // Live end-to-end test of the REAL goofish scraper with 3-page pagination.
-// Run: bun test-goofish-live.ts "iPhone 15 Pro" 3
+// Run: bun test-goofish-live.ts "iPhone 15 Pro" 3 [enrichAll: 0|1]
 import { scrapeGoofish } from "./src/lib/scrapers/goofish";
 
 const query = process.argv[2] || "iPhone 15 Pro";
 const pages = parseInt(process.argv[3] || "3", 10);
+const enrichAll = process.argv[4] === "1";
 
-console.log(`[test] scraping "${query}" with maxPages=${pages} …`);
+console.log(`[test] scraping "${query}" with maxPages=${pages} enrichAll=${enrichAll} …`);
 const t0 = Date.now();
 const r = await scrapeGoofish(query, "iphone", {
   maxPages: pages,
-  enrichAll: false,
+  enrichAll,
 });
 const dt = ((Date.now() - t0) / 1000).toFixed(1);
 console.log(`\n[test] done in ${dt}s`);

@@ -35,6 +35,7 @@ import {
   X,
   Clock,
   SlidersHorizontal,
+  TriangleAlert,
 } from "lucide-react";
 import {
   type AppConfigOverrides,
@@ -901,8 +902,14 @@ export function ControlPanel({
                 Enrich all listings
               </Label>
               <span className="text-[10px] text-muted-foreground">
-                Seller rating + images for every Goofish listing. Slower. Default: top 10 only.
+                Seller rating + images for every Goofish listing. Slower (paced + auto-stops on Baxia blocks to protect your IP). Default: top 5 only.
               </span>
+              {enrichAll && (
+                <span className="mt-1 flex items-start gap-1 text-[10px] leading-tight text-amber-600 dark:text-amber-400">
+                  <TriangleAlert className="mt-0.5 h-3 w-3 shrink-0" />
+                  Opens every listing page — if Goofish starts showing the Baxia login popup when YOU click listings, turn this off and wait ~10 min for the IP flag to clear.
+                </span>
+              )}
             </div>
           </div>
 

@@ -1042,20 +1042,29 @@ async function scrapeGoofishLive(
         };
       }
       if (remaining < 20000) {
-        // Not enough time for enrichment — return listings with flags already set
-        if (ctx) await ctx.close().catch(() => {});
-        await freshBrowser.close();
-        return {
-          listings: listings.slice(0, config.scraping.max_listings_per_search),
-          status: `${status} (enrichment skipped — time limit)`,
-        };
+        // Watchdog headroom check: the orchestrator gives Goofish 660s total;
+        // keep a 45s safety margin for result processing + persistence.
+        // Enrichment runs INSIDE this headroom (it self-limits via its own
+        // deadline), so only skip when there is genuinely no room left.
+        const budgetMs = 660_000 - elapsed - 45_000;
+        if (budgetMs < 30_000) {
+          if (ctx) await ctx.close().catch(() => {});
+          await freshBrowser.close();
+          return {
+            listings: listings.slice(0, config.scraping.max_listings_per_search),
+            status: `${status} (enrichment skipped — watchdog safety margin exhausted after ${Math.round(elapsed / 1000)}s scrape)`,
+          };
+        }
       }
-      const enrichedListings = await enrichListingsFromPages(freshBrowser, ctx, listings, opts);
+      const { listings: enrichedListings, stats: enrichStats } = await enrichListingsFromPages(
+        freshBrowser, ctx, listings, opts,
+        Math.max(30_000, 660_000 - (Date.now() - startTime) - 45_000),
+      );
       if (ctx) await ctx.close().catch(() => {});
       await freshBrowser.close();
       return {
         listings: enrichedListings.slice(0, config.scraping.max_listings_per_search),
-        status: attempt > 1 ? `${status} (succeeded on attempt ${attempt}/${MAX_RETRIES})` : status,
+        status: `${status} | ${enrichStats}${attempt > 1 ? ` (succeeded on attempt ${attempt}/${MAX_RETRIES})` : ""}`,
       };
     }
     // 0 listings — check if Baxia blocked
@@ -1098,20 +1107,42 @@ async function scrapeGoofishLive(
 // load), and if the content still doesn't render the current UA is flagged:
 // we rotate to a fresh Windows Chrome UA and retry the listing once.
 //
-// Runs concurrently (5 at a time) with a 10s timeout per page.
+// ANTI-FLAG PACING (the "Baxia popup when I click a listing" bug):
+// The scraper and the user's own browser share ONE IP. Enrich-all used to
+// open EVERY listing page (85+ after the pagination fix) at concurrency 5
+// with zero delay and no cooldown after a Baxia block — a machine-gun
+// pattern Goofish flags fast, after which the USER's own manual clicks
+// start getting the Baxia SMS popup too. Now enrichment runs at
+// concurrency 2 with per-batch jitter pacing, waits a cooldown after every
+// block, and ABORTS after repeated consecutive blocks so the IP reputation
+// recovers instead of getting hammered deeper. UA rotation does NOT help
+// when the IP itself is flagged — stopping is the only real cure.
+//
+// Runs with a 10s timeout per page and its own time budget (deadline is
+// checked per batch — enrichment never overruns the scan by minutes).
 // If enrichment fails for a listing, it keeps the default values.
 async function enrichListingsFromPages(
   browser: import("playwright").Browser,
   ctx: import("playwright").BrowserContext,
   listings: GoofishListing[],
   opts?: { minPriceCny?: number; maxPriceCny?: number; enrichAll?: boolean },
-): Promise<GoofishListing[]> {
-  const CONCURRENCY = 5; // increased from 3 to speed up enrichment
-  const TIMEOUT_MS = 10000; // reduced from 15s — 10s is enough for most pages
+  budgetMs: number = 300000,
+): Promise<{ listings: GoofishListing[]; stats: string }> {
+  const CONCURRENCY = 2;        // was 5 — concurrent item-page floods trigger Baxia
+  const TIMEOUT_MS = 10000;     // reduced from 15s — 10s is enough for most pages
+  const PACE_MIN_MS = 500;      // jittered delay between batches (per-request pacing)
+  const PACE_MAX_MS = 1100;
+  const BLOCK_COOLDOWN_MS = 8000; // wait after a Baxia block before retrying/continuing
+  const MAX_CONSECUTIVE_BLOCKS = 3; // systematically blocked → stop (UA rotation won't help)
   // If enrichAll is enabled, enrich ALL listings. Otherwise cap at 5 (was 10).
   // Fewer enrichments = faster scan. The top 5 by price are the most relevant.
   const enrichAll = opts?.enrichAll === true;
   const MAX_TO_ENRICH = enrichAll ? listings.length : Math.min(listings.length, 5);
+  // Enrichment time budget: 45s base + 8s per listing, capped at 5 minutes
+  // AND by the caller-provided watchdog headroom (budgetMs). Without this,
+  // enrich-all over 85+ listings ran for many unbounded minutes (no deadline
+  // check existed inside the loop at all).
+  const deadline = Date.now() + Math.max(15000, Math.min(45000 + 8000 * MAX_TO_ENRICH, 300000, budgetMs));
 
   // UA-rotation state: when the Baxia login modal blocks a listing page the
   // current UA is flagged — rotate and retry with a fresh one.
@@ -1119,15 +1150,16 @@ async function enrichListingsFromPages(
   let uaIndex = 0;
 
   // Enrich a single listing page. Returns:
-  //   "ok"      — content extracted (or no href to open)
+  //   "ok"      — content extracted
+  //   "skipped" — no href to open (not counted as enriched)
   //   "blocked" — the Baxia login modal blocked the content; caller should
   //               rotate the UA and retry
   //   "failed"  — transient error (timeout etc.); keep defaults
   const enrichOne = async (
     c: import("playwright").BrowserContext,
     listing: GoofishListing,
-  ): Promise<"ok" | "blocked" | "failed"> => {
-    if (!listing.href) return "ok";
+  ): Promise<"ok" | "skipped" | "blocked" | "failed"> => {
+    if (!listing.href) return "skipped";
     let detailPage: import("playwright").Page | null = null;
     try {
       detailPage = await c.newPage();
@@ -1339,31 +1371,82 @@ async function enrichListingsFromPages(
     }
   };
 
-  // Process listings in batches of CONCURRENCY
+  // Process listings in small batches with jitter pacing between batches.
+  // Blocked results are handled SEQUENTIALLY after the batch resolves — the
+  // UA-rotation mutates the shared activeCtx, which must never race across
+  // concurrent listings (the old code rotated inside Promise.all).
+  let enrichedCount = 0;
+  let skippedCount = 0;
+  let blockedCount = 0;
+  let failedCount = 0;
+  let consecutiveBlocks = 0;
+  let stopReason = "";
+
   for (let i = 0; i < MAX_TO_ENRICH; i += CONCURRENCY) {
+    if (stopReason) break;
+    // Deadline check — never overrun the scan with enrichment.
+    if (Date.now() > deadline) {
+      stopReason = "enrichment time budget exhausted";
+      break;
+    }
     const batch = listings.slice(i, Math.min(i + CONCURRENCY, MAX_TO_ENRICH));
-    console.log(`[Goofish Enrichment] Processing batch ${Math.floor(i / CONCURRENCY) + 1}/${Math.ceil(MAX_TO_ENRICH / CONCURRENCY)} (listings ${i + 1}-${Math.min(i + CONCURRENCY, MAX_TO_ENRICH)}/${MAX_TO_ENRICH})`);
-    await Promise.all(
-      batch.map(async (listing) => {
-        const result = await enrichOne(activeCtx, listing);
-        if (result === "blocked") {
-          // The current UA is flagged by Baxia — rotate to a fresh UA and
-          // retry this listing once. The new context has no prior history
-          // or cookies, giving it a clean anti-bot slate.
-          console.log(`[Goofish Enrichment] Baxia modal blocked ${listing.href} — rotating user agent and retrying`);
-          await activeCtx.close().catch(() => {});
-          uaIndex++;
-          activeCtx = await createGoofishContext(browser, uaIndex);
-          await enrichOne(activeCtx, listing);
-        }
-      }),
+    console.log(`[Goofish Enrichment] batch ${Math.floor(i / CONCURRENCY) + 1}/${Math.ceil(MAX_TO_ENRICH / CONCURRENCY)} (listings ${i + 1}-${Math.min(i + CONCURRENCY, MAX_TO_ENRICH)}/${MAX_TO_ENRICH})`);
+    // Pacing: jittered delay before each batch so item-page visits look
+    // human (a pause between visits, never a machine-gun volley).
+    await sleep(jitter(PACE_MIN_MS, PACE_MAX_MS));
+    const results = await Promise.all(
+      batch.map((listing) => enrichOne(activeCtx, listing)),
     );
+    // Handle results (and any blocks) sequentially — shared context.
+    for (let j = 0; j < batch.length; j++) {
+      const listing = batch[j];
+      const result = results[j];
+      if (result === "ok") {
+        enrichedCount++;
+        consecutiveBlocks = 0;
+        continue;
+      }
+      if (result === "skipped") { skippedCount++; continue; }
+      if (result === "failed") { failedCount++; consecutiveBlocks = 0; continue; }
+      // result === "blocked" — Baxia blocked this item page.
+      blockedCount++;
+      consecutiveBlocks++;
+      console.log(`[Goofish Enrichment] Baxia modal blocked ${listing.href} (${consecutiveBlocks}/${MAX_CONSECUTIVE_BLOCKS} consecutive) — cooldown before retry`);
+      // UA rotation only helps when the FINGERPRINT is flagged; when the IP
+      // is flagged, retrying immediately hammers deeper into the block.
+      // Cooldown first, then one retry on a fresh context.
+      await sleep(jitter(BLOCK_COOLDOWN_MS, BLOCK_COOLDOWN_MS + 4000));
+      if (Date.now() > deadline) { stopReason = "enrichment time budget exhausted"; break; }
+      if (consecutiveBlocks >= MAX_CONSECUTIVE_BLOCKS) {
+        stopReason = `Baxia blocked ${blockedCount} listing pages — enrichment stopped to protect your IP reputation (retry later, or turn off "Enrich all listings")`;
+        break;
+      }
+      await activeCtx.close().catch(() => {});
+      uaIndex++;
+      activeCtx = await createGoofishContext(browser, uaIndex);
+      const retry = await enrichOne(activeCtx, listing);
+      if (retry === "ok") {
+        enrichedCount++;
+        consecutiveBlocks = 0;
+      } else if (retry === "failed" || retry === "skipped") {
+        failedCount++;
+      }
+      // retry === "blocked" → keep consecutiveBlocks as-is (already counted).
+    }
+    if (stopReason) break;
   }
 
   // Close the rotated context if we created one (the caller closes the
   // original context itself).
   if (activeCtx !== ctx) await activeCtx.close().catch(() => {});
-  return listings;
+  const stats =
+    `enrichment: ${enrichedCount}/${MAX_TO_ENRICH} enriched` +
+    (skippedCount ? `, ${skippedCount} no-link` : "") +
+    (blockedCount ? `, ${blockedCount} Baxia-blocked` : "") +
+    (failedCount ? `, ${failedCount} failed` : "") +
+    (stopReason ? ` — ${stopReason}` : "");
+  console.log(`[Goofish Enrichment] done — ${stats}`);
+  return { listings, stats };
 }
 
 export async function scrapeGoofish(
