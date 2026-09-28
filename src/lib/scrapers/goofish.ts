@@ -175,6 +175,17 @@ function getMinPriceCny(category: Category): number {
  *  - "packaging included" phrases (包装齐全 / 盒子还在 / 带 / 含 / 送 +
  *    accessory word) are always whitelisted.
  */
+// ── JUNK IMAGE URL CHECK (module-level) ───────────────────────────────
+// Lazy-load placeholders (tps-2-2 = a 2×2 TRANSPARENT pixel), badge icons
+// (imgextra/…tps-WxH.png) and seller avatars (mtopupload) are NOT product
+// photos. Used to (a) upgrade a junk thumbnail when a later scroll round
+// sees the real photo and (b) drop junk URLs from detail-page enrichment.
+const isJunkImageUrl = (u: string): boolean =>
+  !u || /^(?:data:|about:|blob:)/i.test(u)
+  || /imgextra\//i.test(u)
+  || /\/tps-\d+-\d+\./i.test(u)
+  || /mtopupload/i.test(u);
+
 function junkReason(title: string): string | null {
   // Whitelist: accessory/packaging INCLUDED phrases — legit selling points.
   const accIncluded =
@@ -576,6 +587,65 @@ async function scrapeGoofishLive(
         const usePositional = titleEls.length === priceEls.length
           && titleEls.length > 0;
 
+        // ── CARD IMAGE RESOLUTION ─────────────────────────────────────
+        // Every card contains MULTIPLE <img> elements: the product photo
+        // (class prefix "feeds-image--"), seller avatar ("avatar--") and
+        // service badge icons (gw.alicdn.com/imgextra/…tps-*.png). Images
+        // also lazy-hydrate: a freshly rendered card can have an empty or
+        // placeholder `src` for a moment before the real URL arrives.
+        // The old code took card.querySelector("img")?.src only — a card
+        // captured pre-hydration produced an imageless listing forever.
+        // This resolver scores every candidate and never returns avatars,
+        // icons or data: placeholders while a real photo URL exists.
+        const PLACEHOLDER_URL_RE = /^(?:data:|about:|blob:|javascript:)/i;
+        // imgextra/…tps-WxH = badge icons AND the lazy-load placeholder itself
+        // (tps-2-2 = a 2×2 TRANSPARENT pixel — renders as an invisible tile,
+        // the "listing without image" symptom). mtopupload = seller avatar.
+        // Real product photos always live under img.alicdn.com/bao/uploaded/.
+        const JUNK_IMG_URL_RE = /imgextra\/|\/tps-\d+-\d+\./i;
+        const AVATAR_URL_RE = /mtopupload/i;
+        const imageScore = (url: string, cls: string): number => {
+          let s = 0;
+          if (/feeds-image/i.test(cls)) s += 100;          // product photo class
+          if (/bao\/uploaded/i.test(url)) s += 40;         // product CDN path
+          if (/\d{2,4}x10000/i.test(url)) s += 10;         // sized product thumb
+          if (/avatar/i.test(cls)) s -= 100;               // seller avatar class
+          if (AVATAR_URL_RE.test(url)) s -= 150;           // seller avatar URL
+          if (JUNK_IMG_URL_RE.test(url)) s -= 150;         // icon / 2×2 placeholder
+          if (PLACEHOLDER_URL_RE.test(url)) s -= 1000;     // never a placeholder
+          return s;
+        };
+        const pickCardImage = (root: HTMLElement | null): string => {
+          if (!root) return "";
+          let bestUrl = "";
+          let bestScore = -Infinity;
+          for (const img of Array.from(root.querySelectorAll<HTMLImageElement>("img"))) {
+            // Try every attribute that can carry the real URL — lazy loaders
+            // park it in data-* attrs on some card variants.
+            for (const attr of ["src", "data-src", "data-lazy-src", "data-original"]) {
+              const u = (img.getAttribute(attr) || "").trim();
+              if (!u) continue;
+              const score = imageScore(u, img.className || "");
+              if (score > bestScore) { bestScore = score; bestUrl = u; }
+              if (u && !PLACEHOLDER_URL_RE.test(u)) break; // real URL on this img
+            }
+          }
+          // Some card variants render the photo as a CSS background instead
+          // of an <img> — harvest url(…) from inline styles too. Only when
+          // no confidently-good <img> candidate exists (bestScore <= 0).
+          if (bestScore <= 0) {
+            for (const el of Array.from(root.querySelectorAll<HTMLElement>('[style*="background-image"]'))) {
+              const m = (el.style.backgroundImage || "").match(/url\(["']?([^"')]+)["']?\)/);
+              if (m?.[1] && !PLACEHOLDER_URL_RE.test(m[1]) && !JUNK_IMG_URL_RE.test(m[1])) { bestUrl = m[1]; bestScore = 1; break; }
+            }
+          }
+          // Require at least one POSITIVE product-photo marker (feeds-image
+          // class / bao/uploaded CDN path / sized thumb). A card whose only
+          // image is the tps-2-2 placeholder (score < 0) returns "" so a
+          // later scroll round can backfill the real photo via the merge.
+          return bestScore > 0 && bestUrl ? bestUrl : "";
+        };
+
         // Per-title fallback: walk up from the title to the SMALLEST ancestor
         // containing exactly ONE title and ONE price element — that ancestor
         // is the listing card, so the price is guaranteed to be this title's.
@@ -639,7 +709,6 @@ async function scrapeGoofishLive(
           if (bounds.maxPrice > 0 && priceNum > bounds.maxPrice) return;
 
           const cardText = card?.textContent?.replace(/\s+/g, " ").trim().substring(0, 500) || "";
-          const imgEl = card?.querySelector("img");
           // HREF: use titleEl.closest('a') for this title's own link
           let linkEl: HTMLAnchorElement | null = (titleEl as HTMLElement).closest<HTMLAnchorElement>("a[href*='/item'], a[href*='/detail']");
           if (!linkEl && card) {
@@ -658,7 +727,7 @@ async function scrapeGoofishLive(
             title,
             priceText,
             description: cardText,
-            imageUrl: imgEl?.getAttribute("src") || imgEl?.getAttribute("data-src") || "",
+            imageUrl: pickCardImage(card) || pickCardImage((titleEl as HTMLElement).closest("a")),
             href: resolvedHref,
             location: "中国",
           });
@@ -684,7 +753,13 @@ async function scrapeGoofishLive(
       title: string; priceText: string; description: string;
       imageUrl: string; href: string; location: string;
     }> = [];
-    const seenTitles = new Set<string>();
+    // Title → first-seen raw entry (replaces the old seenTitles Set).
+    // Unlike a Set, the Map lets later scroll rounds BACKFILL fields the
+    // first capture missed — the classic case being a listing extracted
+    // before its lazy-loaded thumbnail hydrated: without the merge below
+    // that card stayed imageless FOREVER even though every later round saw
+    // its fully-loaded photo (the "some listings have no image" bug).
+    const rawByTitle = new Map<string, (typeof allRawListings)[number]>();
     const MAX_SCROLL_ROUNDS = 24; // per page
     const STABLE_ROUNDS_BEFORE_END = 5; // ~10s of no new listings → end of page
     // Extract everything currently rendered, with a 15s timeout so a hung
@@ -805,11 +880,22 @@ async function scrapeGoofishLive(
             status: `LIVE OK (Playwright, 0 listings) | WARNING: Goofish returned "no results" page (showing recommendations). Baxia CAPTCHA likely blocked the search. Try again later or use Manual Paste.`,
           };
         }
-        // 2) Accumulate new (unseen) listings
+        // 2) Accumulate new (unseen) listings; MERGE late-arriving data into
+        //    already-seen ones. First-seen title/price always win; only
+        //    fields that were empty on first sight get backfilled (lazy
+        //    thumbnail, href hydration).
         let addedNew = 0;
         for (const l of batch) {
-          if (!seenTitles.has(l.title)) {
-            seenTitles.add(l.title);
+          const existing = rawByTitle.get(l.title);
+          if (existing) {
+            if (!existing.imageUrl && l.imageUrl) existing.imageUrl = l.imageUrl;
+            // UPGRADE: first capture grabbed the lazy placeholder / avatar /
+            // icon and a later round now sees the real product photo.
+            else if (isJunkImageUrl(existing.imageUrl) && !isJunkImageUrl(l.imageUrl)) existing.imageUrl = l.imageUrl;
+            if (!existing.href && l.href) existing.href = l.href;
+            if (!existing.description && l.description) existing.description = l.description;
+          } else {
+            rawByTitle.set(l.title, l);
             allRawListings.push(l);
             addedNew++;
           }
@@ -959,7 +1045,7 @@ async function scrapeGoofishLive(
           title: r.title,
           priceCny,
           description: r.description,
-          imageUrls: r.imageUrl
+          imageUrls: r.imageUrl && !isJunkImageUrl(r.imageUrl)
             ? [r.imageUrl.startsWith("//")
               ? `https:${r.imageUrl}`
               : r.imageUrl.startsWith("http")
@@ -978,9 +1064,25 @@ async function scrapeGoofishLive(
           href: r.href || undefined,
         };
       });
+    // ── IMAGE COVERAGE REPORTING ─────────────────────────────────────
+    // The user-visible thumbnail comes from imageUrls[0]. Surface how many
+    // kept listings actually carry one so "some cards show no photo" is
+    // measurable in every scan instead of invisible.
+    const withImage = listings.filter((l) => l.imageUrls.length > 0).length;
+    const imageless = listings.filter((l) => l.imageUrls.length === 0);
+    if (imageless.length > 0) {
+      console.warn(
+        `[goofish] ${imageless.length}/${listings.length} listings have NO thumbnail: ` +
+          imageless
+            .slice(0, 6)
+            .map((l) => `"${l.title.slice(0, 50)}"`)
+            .join(" | "),
+      );
+    }
+    const imageCoverage = `images: ${withImage}/${listings.length} listings with thumbnail`;
     // Build a diagnostic status string when 0 listings are extracted.
     // This helps debug why the scraper fails even though the page loaded.
-    let status = `LIVE OK (Playwright, ${listings.length} listings extracted from ${pageYield.length} page${pageYield.length === 1 ? "" : "s"} [${pageYield.join("+")}]; ${filterBreakdown}${lastPaginationNote ? `; pagination stopped early: ${lastPaginationNote}` : ""})`;
+    let status = `LIVE OK (Playwright, ${listings.length} listings extracted from ${pageYield.length} page${pageYield.length === 1 ? "" : "s"} [${pageYield.join("+")}]; ${filterBreakdown}; ${imageCoverage}${lastPaginationNote ? `; pagination stopped early: ${lastPaginationNote}` : ""})`;
     if (listings.length === 0) {
       // Run a quick diagnostic to see what's on the page
       try {
@@ -1309,9 +1411,13 @@ async function enrichListingsFromPages(
       }
       if (enriched.imageCount > 0) {
         listing.imageCount = enriched.imageCount;
-        // Replace search-page thumbnail with full listing-page images
-        if (enriched.imageUrls.length > 0) {
-          listing.imageUrls = enriched.imageUrls;
+        // Replace search-page thumbnail with full listing-page images —
+        // but keep the search thumbnail when the detail page only yielded
+        // junk (placeholders / icons / avatars). A junk-only replacement
+        // would swap a REAL photo for an invisible 2×2 tile.
+        const cleanDetailImages = enriched.imageUrls.filter((u) => !isJunkImageUrl(u));
+        if (cleanDetailImages.length > 0) {
+          listing.imageUrls = cleanDetailImages;
         }
       }
 

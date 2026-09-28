@@ -22,4 +22,16 @@ const ids = r.listings.slice(0, 40).map((l) => l.id);
 console.log(`[test] first ids: ${ids.slice(0, 12).join(", ")}`);
 const gfLiveIds = ids.filter((i) => i.startsWith("gf-live-")).length;
 console.log(`[test] ids without real item id (positional fallback): ${gfLiveIds}`);
+// Thumbnail coverage: every listing must carry the goofish small image
+const withImg = r.listings.filter((l) => l.imageUrls.length > 0);
+console.log(`[test] thumbnails: ${withImg.length}/${r.listings.length} listings have an image`);
+const noImg = r.listings.filter((l) => l.imageUrls.length === 0);
+if (noImg.length > 0) {
+  console.log(`[test] MISSING thumbnails (${noImg.length}):`);
+  for (const l of noImg.slice(0, 10)) console.log(`   - "${l.title.slice(0, 60)}"`);
+}
+// Sample a few extracted thumbnail URLs to eyeball correctness (product CDN, not avatar/icon)
+for (const l of withImg.slice(0, 3)) {
+  console.log(`[test] sample img: ${l.imageUrls[0].slice(0, 110)}  ← "${l.title.slice(0, 40)}"`);
+}
 process.exit(0);
